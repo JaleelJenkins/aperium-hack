@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import Link from "next/link";
+import { cache } from "react";
 import { Instrument_Serif, JetBrains_Mono, Plus_Jakarta_Sans } from "next/font/google";
 import { listClientsForNav } from "@/lib/board";
 import { getDb } from "@/lib/db";
@@ -18,26 +20,29 @@ export const metadata: Metadata = {
   description: "Every AI claim about a client project is evidence-backed, model-reviewed and human-approved.",
 };
 
+const getSidebarBadges = cache((db: ReturnType<typeof getDb>) => {
+  const caught = caughtCount(db);
+  const rules = (db.prepare(`SELECT COUNT(*) AS n FROM review_rules WHERE enabled = 1`).get() as { n: number }).n;
+  const approvals = (db.prepare(`SELECT COUNT(*) AS n FROM actions WHERE status = 'proposed'`).get() as { n: number }).n;
+  const nextApproval = (db.prepare(`SELECT id FROM actions WHERE status = 'proposed' ORDER BY created_at LIMIT 1`).get() as { id: string } | undefined)?.id;
+  return { caught, rules, approvals, nextApproval };
+});
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   const db = getDb();
   const clients = listClientsForNav(db);
-  const caught = caughtCount(db);
-  const rules = (db.prepare(`SELECT COUNT(*) AS n FROM review_rules WHERE enabled = 1`).get() as { n: number }).n;
-  const approvals = (db.prepare(`SELECT COUNT(*) AS n FROM actions WHERE status = 'proposed'`).get() as { n: number }).n;
-  // "Needs approval" opens the oldest waiting item in the drawer, so the queue is one click per decision.
-  const nextApproval = (db.prepare(`SELECT id FROM actions WHERE status = 'proposed' ORDER BY created_at LIMIT 1`).get() as { id: string } | undefined)?.id;
+  const { caught, rules, approvals, nextApproval } = getSidebarBadges(db);
   return (
     <html lang="en" className={`${serif.variable} ${sans.variable} ${mono.variable}`}>
       <body>
         <div className="shell">
           <aside className="sidebar">
-            <a href="/" className="brand">
+            <Link href="/" className="brand">
               <span className="brand-mark" aria-hidden="true" />
               <span className="brand-text">
                 <span className="brand-name">Reasoning Intelligence</span>
               </span>
-            </a>
+            </Link>
 
             <div className="side-label">Portfolio</div>
             <nav className="side-nav">

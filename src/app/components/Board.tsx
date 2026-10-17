@@ -91,7 +91,6 @@ function Card({ card, triage, hrefFor, selected }: { card: BoardCard; triage: bo
       className={`card kind-${card.kind}${doneish ? " is-done" : ""}${selected ? " selected" : ""}`}
       href={hrefFor(card.ref)}
       scroll={false}
-      prefetch={false}
     >
       <div className="card-top">
         {card.key && <span className="ticket">{card.key}</span>}
