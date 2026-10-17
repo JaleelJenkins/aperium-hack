@@ -36,11 +36,17 @@ interface ChatResponse {
   error?: { message?: string; code?: number | string };
 }
 
-export type FetchLike = (url: string, init: { method: string; headers: Record<string, string>; body: string }) => Promise<{
+export type FetchLike = (url: string, init: { method: string; headers: Record<string, string>; body: string; signal?: AbortSignal }) => Promise<{
   ok: boolean;
   status: number;
   text(): Promise<string>;
 }>;
+
+/** Per-request model timeout. LLM_TIMEOUT_MS overrides; default 90 s. */
+export function llmTimeoutMs(): number {
+  const n = Number(process.env.LLM_TIMEOUT_MS);
+  return Number.isFinite(n) && n > 0 ? n : 90_000;
+}
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -72,8 +78,17 @@ export async function openRouterCall<T>(
 
   const retries = opts.maxRetries ?? 3;
   for (let attempt = 0; ; attempt++) {
-    const res = await doFetch(`${ENDPOINT}/chat/completions`, { method: "POST", headers, body });
-    const text = await res.text();
+    // A stuck request must not hold the pipeline lease: give up and retry after llmTimeoutMs().
+    let res: Awaited<ReturnType<FetchLike>>;
+    let text: string;
+    try {
+      res = await doFetch(`${ENDPOINT}/chat/completions`, { method: "POST", headers, body, signal: AbortSignal.timeout(llmTimeoutMs()) });
+      text = await res.text();
+    } catch (err) {
+      const timedOut = err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
+      if (timedOut && attempt < retries) continue;
+      throw timedOut ? new Error(`OpenRouter ${model}: no response after ${llmTimeoutMs() / 1000}s`) : err;
+    }
     if (!res.ok) {
       if ((res.status === 429 || res.status >= 500) && attempt < retries) {
         await sleep(500 * 2 ** attempt);

@@ -377,3 +377,20 @@ describe("OpenRouter provider", () => {
     }
   });
 });
+
+describe("model call timeouts", () => {
+  it("a request that never answers times out and retries instead of hanging", async () => {
+    process.env.LLM_TIMEOUT_MS = "50";
+    let calls = 0;
+    const hanging: FetchLike = (_url, init) =>
+      new Promise((_, reject) => {
+        calls++;
+        init.signal?.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "TimeoutError" })));
+      });
+    await expect(
+      openRouterCall("x/y", { model: "x/y", system: "", content: [], tool: { name: "t", description: "", input_schema: { type: "object" } } }, { apiKey: "k", fetch: hanging, maxRetries: 1 }),
+    ).rejects.toThrow(/no response after/);
+    expect(calls).toBe(2);
+    delete process.env.LLM_TIMEOUT_MS;
+  });
+});

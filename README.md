@@ -139,6 +139,7 @@ npm run worker
 | `OPENROUTER_MODEL_GEMINI_FLASH` | router pair `flash-haiku` | an OpenRouter model id; until set, that pair is unavailable to the router |
 | `PIPELINE_CONCURRENCY` | pipeline | emails processed at once, default `4`. Each email runs Extract → Resolve → Reason → Review end to end, so cards leave Triage as soon as their own email is done |
 | `EXTRACT_MODEL`, `RESOLVE_MODEL` | Extract, Resolve | defaults `claude-sonnet-5-5`, `claude-haiku-5-5` |
+| `LLM_TIMEOUT_MS` | model layer | per-request timeout before a retry, default `90000`, so a stuck call can't stall the pipeline |
 | `ASK_SLA_HOURS` | insight rules | hours before an unanswered client ask is flagged, default `24` |
 | `LIVE_DEMO_SENDER` | live demo | the teammate's phone address; `npm run seed` maps it to Harbor & Pine in place of `CHANGE_ME.live-demo` |
 | `DATA_DIR` | storage | SQLite DB + attachments, default `./data` (gitignored) |
