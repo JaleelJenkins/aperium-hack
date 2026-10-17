@@ -1,6 +1,8 @@
 import Link from "next/link";
-import type { CaughtClaim, Inspection, SourceView } from "@/lib/inspect";
-import { ago, dueText, modelShort } from "../format";
+import type { CaughtClaim, Inspection, ModelNotes, SourceView } from "@/lib/inspect";
+import type { RouteTrace } from "@/lib/board";
+import { POLICY_LABEL } from "@/lib/router/types";
+import { ago, dueText, modelShort, secs, usd } from "../format";
 import { ApprovalPanel } from "./ApprovalPanel";
 import { KIND_LABEL, type HrefFor } from "./Board";
 import { DrawerKeys } from "./DrawerKeys";
@@ -109,6 +111,61 @@ function EditedNote({ a }: { a: NonNullable<Inspection["approval"]> }) {
 
 const VERDICT_LABEL: Record<string, string> = { pass: "Verified", revise: "Revised", block: "Blocked" };
 
+/** Which Reason → Review pair the router picked for this email, and why. */
+export function RoutingDecision({ route }: { route: RouteTrace }) {
+  return (
+    <div>
+      <div className="d-section-label">
+        <Icon name="refresh" size={12} />
+        Routing decision
+      </div>
+      <div className="route-decision">
+        <span className="k">Pair</span>
+        <span className="v">{route.pairLabel}</span>
+        <span className="k">Policy</span>
+        <span className="v">{POLICY_LABEL[route.policy] ?? route.policy}</span>
+        <span className="k">Escalated</span>
+        <span className="v">{route.escalated ? route.triggers.join("; ") || "yes" : "no"}</span>
+        <span className="k">Why</span>
+        <span className="v">{route.reason}</span>
+        <span className="k">Estimate</span>
+        <span className="v">
+          {usd(route.estCostUsd)} / email · {secs(route.estLatencyMs)}
+          {route.illustrative ? " (illustrative)" : ""}
+        </span>
+        <span className="k">Source</span>
+        <span className="v">{route.recorded ? "Recorded when the email was processed" : "Live, under current routing policy"}</span>
+      </div>
+    </div>
+  );
+}
+
+/** Each model's own note for this email, in scrollable boxes. */
+export function ModelReasoning({ notes }: { notes: ModelNotes }) {
+  const box = (label: string, model: string | null, text: string | null) => (
+    <div className="reasoning-box">
+      <div className="reasoning-who">
+        {label} · {model ? modelShort(model) : "none"}
+      </div>
+      <div className="reasoning-text" tabIndex={0}>
+        {text ?? <span className="muted">No reasoning recorded for this run.</span>}
+      </div>
+    </div>
+  );
+  return (
+    <div>
+      <div className="d-section-label">
+        <Icon name="zap" size={12} />
+        Model reasoning
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {box("Reason", notes.reasonModel, notes.reasonNote)}
+        {notes.reviewModel && box("Review", notes.reviewModel, notes.reviewNote)}
+      </div>
+    </div>
+  );
+}
+
 export function InspectorDrawer({ item, hrefFor }: { item: Inspection; hrefFor: HrefFor }) {
   const closeHref = hrefFor(null);
   const a = item.audit;
@@ -187,6 +244,9 @@ export function InspectorDrawer({ item, hrefFor }: { item: Inspection; hrefFor: 
           <p className="muted">No evidence attached.</p>
         )}
       </div>
+
+      {item.routing && <RoutingDecision route={item.routing} />}
+      {item.reasoning && <ModelReasoning notes={item.reasoning} />}
 
       {a && (
         <div>

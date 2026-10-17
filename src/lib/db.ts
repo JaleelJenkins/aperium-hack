@@ -434,6 +434,11 @@ const MIGRATIONS: string[] = [
   -- Edits keep what the model proposed, so the scoreboard can measure how much people change.
   ALTER TABLE actions ADD COLUMN original_payload_json TEXT;
   `,
+
+  /* 008: each model's own explanation, shown in the evidence drawer */ `
+  ALTER TABLE pipeline_runs ADD COLUMN reason_trace TEXT;   -- Reason model's notes for this email
+  ALTER TABLE pipeline_runs ADD COLUMN review_trace TEXT;   -- Review model's notes on the items
+  `,
 ];
 
 export function openDb(file: string): DB {

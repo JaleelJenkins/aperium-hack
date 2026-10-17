@@ -53,6 +53,10 @@ export const REVIEW_TOOL = {
   input_schema: {
     type: "object" as const,
     properties: {
+      reasoning: {
+        type: "string",
+        description: "A short plain-language note on what you checked in the full source and why each verdict came out as it did. Shown to the user.",
+      },
       items: {
         type: "array",
         items: {
@@ -434,6 +438,9 @@ function pickPair(db: DB, messageId: string, projectId: string, deps: ReasonRevi
 const failures = (db: DB, messageId: string) =>
   (db.prepare(`SELECT COUNT(*) AS n FROM pipeline_runs WHERE message_id = ? AND error IS NOT NULL`).get(messageId) as { n: number }).n;
 
+/** A model's free-text note, trimmed and capped; null when absent. */
+export const noteText = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim().slice(0, 20000) : null);
+
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e)).slice(0, 500);
 
 function mergeProvider(a: string | null, b: string | null): string | null {
@@ -468,12 +475,12 @@ export async function runReason(db: DB, deps: ReasonReviewDeps, opts: { limit?: 
         for (const b of blocked) logBlocked(ctx, b);
         db.prepare(
           `INSERT INTO pipeline_runs (id, message_id, reason_profile_id, review_profile_id, input_tokens, output_tokens, cost_usd,
-                                      pair_id, stage, reason_json, reason_ms, provider)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'reasoned', ?, ?, ?)`,
+                                      pair_id, stage, reason_json, reason_ms, provider, reason_trace)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'reasoned', ?, ?, ?, ?)`,
         ).run(
           runId, id, pair!.reason, pair!.review ?? "none", r.usage.input_tokens, r.usage.output_tokens, r.cost_usd ?? 0,
           pair!.id, JSON.stringify({ kept, blocked: blocked.map((b) => ({ tmp_id: b.tmp_id, blocked_by: b.blocked_by })) }),
-          Date.now() - t0, r.provider,
+          Date.now() - t0, r.provider, noteText(r.raw.reasoning),
         );
         db.prepare(`UPDATE messages SET status = 'reasoned', error = NULL WHERE gmail_message_id = ?`).run(id);
         audit(db, pair!.reason, "message.reasoned", `message:${id}`, {
@@ -530,10 +537,12 @@ export async function runReview(db: DB, deps: ReasonReviewDeps, opts: { limit?: 
       let usage = { input_tokens: 0, output_tokens: 0 };
       let cost = 0;
       let provider: string | null = null;
+      let reviewTrace: string | null = null;
       if (reviewerModel && items.length) {
         const reviewer = deps.reviewer ? deps.reviewer(reviewerModel) : llmReviewer(deps.llm, reviewerModel);
         const r = await reviewer.review(bundle, items);
         verdicts = parseVerdicts(r.raw);
+        reviewTrace = noteText((r.raw as { reasoning?: unknown } | null)?.reasoning);
         usage = r.usage;
         cost = r.cost_usd ?? 0;
         provider = r.provider;
@@ -551,9 +560,9 @@ export async function runReview(db: DB, deps: ReasonReviewDeps, opts: { limit?: 
         const latency = Date.now() - Date.parse(received.received_at);
         db.prepare(
           `UPDATE pipeline_runs SET stage = 'reviewed', input_tokens = input_tokens + ?, output_tokens = output_tokens + ?,
-                  cost_usd = cost_usd + ?, review_ms = ?, latency_ms = ?, provider = ?, reason_json = NULL
+                  cost_usd = cost_usd + ?, review_ms = ?, latency_ms = ?, provider = ?, reason_json = NULL, review_trace = ?
             WHERE id = ?`,
-        ).run(usage.input_tokens, usage.output_tokens, cost, Date.now() - t0, latency, mergeProvider(run.provider, provider), run.id);
+        ).run(usage.input_tokens, usage.output_tokens, cost, Date.now() - t0, latency, mergeProvider(run.provider, provider), reviewTrace, run.id);
         db.prepare(`UPDATE messages SET status = 'reviewed', error = NULL WHERE gmail_message_id = ?`).run(run.message_id);
         db.prepare(`UPDATE projects SET last_contact_at = MAX(COALESCE(last_contact_at, ''), ?) WHERE id = ?`).run(received.received_at, bundle.project.id);
         audit(db, reviewerModel ?? run.reason_profile_id, "message.reviewed", `message:${run.message_id}`, { pair: run.pair_id, counts });

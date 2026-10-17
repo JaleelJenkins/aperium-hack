@@ -5,7 +5,7 @@
  */
 import type { DB } from "./db";
 import type { Evidence } from "./contracts";
-import { attachmentNames, evidenceLinkFor, modelNames, ticketKeys, type CardKind, type EvidenceLink } from "./board";
+import { attachmentNames, evidenceLinkFor, modelNames, routeResolver, ticketKeys, type CardKind, type EvidenceLink, type RouteTrace } from "./board";
 import { quoteLine } from "./evidence";
 
 export type InspectRef = { type: "signal" | "action" | "email"; id: string } | { type: "caught" };
@@ -61,6 +61,10 @@ export interface Inspection {
   messageHref: string | null;
   /** Present for actions: what the approval controls need. */
   approval: ApprovalInfo | null;
+  /** Which Reason/Review pair the router chose for the source email, and why. */
+  routing: RouteTrace | null;
+  /** Each model's own note for the source email (latest run). */
+  reasoning: ModelNotes | null;
 }
 
 export interface ApprovalInfo {
@@ -80,6 +84,31 @@ export interface ApprovalInfo {
   /** For "save as rule" on reject. */
   projectName: string | null;
   clientName: string | null;
+}
+
+export interface ModelNotes {
+  reasonModel: string | null;
+  reviewModel: string | null;
+  reasonNote: string | null;
+  reviewNote: string | null;
+}
+
+/** Latest pipeline run's notes for a message; null when the message hasn't been reasoned. */
+function notesFor(db: DB, messageId: string | null, model: (id: string | null) => string | null): ModelNotes | null {
+  if (!messageId) return null;
+  const r = db
+    .prepare(
+      `SELECT reason_profile_id, review_profile_id, reason_trace, review_trace FROM pipeline_runs
+        WHERE message_id = ? AND error IS NULL ORDER BY at DESC LIMIT 1`,
+    )
+    .get(messageId) as { reason_profile_id: string; review_profile_id: string; reason_trace: string | null; review_trace: string | null } | undefined;
+  if (!r) return null;
+  return {
+    reasonModel: model(r.reason_profile_id),
+    reviewModel: r.review_profile_id === "none" ? null : model(r.review_profile_id),
+    reasonNote: r.reason_trace,
+    reviewNote: r.review_trace,
+  };
 }
 
 export interface CaughtClaim {
@@ -178,6 +207,8 @@ export function inspect(db: DB, ref: InspectRef): Inspection | null {
   if (ref.type === "caught") return null;
   const keys = ticketKeys(db);
   const model = modelNames(db);
+  const routeFor = routeResolver(db);
+  const trail = (messageId: string | null) => ({ routing: routeFor(messageId), reasoning: notesFor(db, messageId, model) });
 
   if (ref.type === "signal") {
     const s = db.prepare(`SELECT * FROM signals WHERE id = ?`).get(ref.id) as
@@ -209,6 +240,7 @@ export function inspect(db: DB, ref: InspectRef): Inspection | null {
       },
       messageHref: s.message_id ? `/messages/${encodeURIComponent(s.message_id)}` : null,
       approval: null,
+      ...trail(s.message_id),
     };
   }
 
@@ -252,6 +284,7 @@ export function inspect(db: DB, ref: InspectRef): Inspection | null {
       },
       messageHref: a.message_id ? `/messages/${encodeURIComponent(a.message_id)}` : null,
       approval: approvalInfo(db, a, p),
+      ...trail(a.message_id),
     };
   }
 
@@ -274,6 +307,7 @@ export function inspect(db: DB, ref: InspectRef): Inspection | null {
     audit: null,
     messageHref: link.href,
     approval: null,
+    ...trail(m.id),
   };
 }
 
