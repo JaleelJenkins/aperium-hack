@@ -230,6 +230,7 @@ Not seeded. A teammate sends it live from their phone to the inbox, from the add
 | `npm run seed:inbox` | Put the 15 demo emails into the connected inbox (`-- --dry-run` to preview) |
 | `npm run seed:labels` | Regenerate `seed/labels.json` after editing `seed/emails.ts` |
 | `npm run db:reset` | Back to a clean demo state, keeping Gmail connected |
+| `npm run mail:remove -- --ignored` | Remove non-client mail (Google account notices, bounces) from the database; `--subject "text"` or a Gmail id also work, `--dry-run` previews |
 | `npm run db:reset -- --all` | Same, and disconnect Gmail (wipes tokens) |
 | `npm run demo:ui` | **Dev only:** fill the board with the PRD demo story (rows prefixed `demo-`) to build UI before the pipeline exists. Refuses if real mail is present; `-- --clear` removes them; `db:reset` wipes them too |
 | `npm test` | Cleaner, parser, sync, evidence, contracts, crypto, seed and DB tests |

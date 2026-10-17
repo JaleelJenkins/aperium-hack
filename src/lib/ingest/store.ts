@@ -4,6 +4,7 @@ import path from "node:path";
 import { config } from "../config";
 import { audit, type DB } from "../db";
 import type { GmailApi } from "../gmail/client";
+import { isIgnoredSender } from "./ignore";
 import { parseGmailMessage, type ParsedAttachment, type ParsedEmail } from "./parse";
 
 export type IngestOutcome = "new" | "exists" | "skipped";
@@ -40,6 +41,10 @@ export async function ingestMessage(
 
   const parsed = parseGmailMessage(await api.getMessage(messageId));
   if (!isInbound(parsed.labelIds)) return "skipped";
+  if (isIgnoredSender(parsed.from?.email)) {
+    audit(db, "worker", "message.ignored", `message:${parsed.id}`, { from: parsed.from?.email, subject: parsed.subject });
+    return "skipped";
+  }
 
   const dataDir = opts.dataDir ?? config.dataDir;
   const stored = await Promise.all(parsed.attachments.map((a) => fetchAttachment(api, parsed, a, dataDir)));

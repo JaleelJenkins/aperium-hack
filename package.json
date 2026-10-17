@@ -13,6 +13,7 @@
     "seed:inbox": "tsx scripts/seed-inbox.ts",
     "seed:labels": "tsx scripts/seed-labels.ts",
     "db:reset": "tsx scripts/db-reset.ts",
+    "mail:remove": "tsx scripts/mail-remove.ts",
     "demo:ui": "tsx scripts/demo-ui.ts",
     "build": "next build",
     "start": "next start",
