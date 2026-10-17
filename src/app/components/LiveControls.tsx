@@ -25,9 +25,14 @@ export function SyncNowButton() {
       const res = await fetch("/api/ingest/sync", { method: "POST" });
       const body = (await res.json()) as {
         results: ({ account: string; newEmailIds?: string[]; error?: string })[];
+        pipeline: "started" | "busy" | "idle";
+        waiting: number;
       };
       const parts = body.results.map((r) => (r.error ? `${r.account}: ${r.error}` : `+${r.newEmailIds?.length ?? 0} new`));
-      setMsg(parts.join(" · ") || "No inbox connected");
+      if (!parts.length) parts.push("No inbox connected");
+      if (body.pipeline === "started") parts.push(`processing ${body.waiting} email${body.waiting === 1 ? "" : "s"}…`);
+      else if (body.pipeline === "busy") parts.push("pipeline already running");
+      setMsg(parts.join(" · "));
       router.refresh();
     } catch (err) {
       setMsg(err instanceof Error ? err.message : String(err));
