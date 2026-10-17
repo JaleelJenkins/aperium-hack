@@ -1,0 +1,89 @@
+{
+  "_readme": "Demo seed (PRD: Demo script and seed data). Three fictional clients, five projects. Seed emails are sent from teammates' real addresses, so map each teammate address to a client under contacts. Replace every CHANGE_ME address before the demo; `npm run seed` warns while any remain.",
+  "clients": [
+    {
+      "id": "harbor-pine",
+      "name": "Harbor & Pine Architects",
+      "domains": ["harborpine.com"],
+      "contacts": [{ "email": "CHANGE_ME.harbor@gmail.com", "name": "Harbor & Pine (teammate)" }]
+    },
+    {
+      "id": "vector-freight",
+      "name": "Vector Freight",
+      "domains": ["vectorfreight.io"],
+      "contacts": [{ "email": "CHANGE_ME.vector@gmail.com", "name": "Vector Freight (teammate)" }]
+    },
+    {
+      "id": "lumen-clinic",
+      "name": "Lumen Clinic",
+      "domains": ["lumenclinic.com"],
+      "contacts": [{ "email": "CHANGE_ME.lumen@gmail.com", "name": "Lumen Clinic (teammate)" }]
+    }
+  ],
+  "projects": [
+    {
+      "id": "harbor-lobby",
+      "client_id": "harbor-pine",
+      "name": "Lobby redesign",
+      "summary": "Redesign of the ground-floor lobby; client sends marked-up floor plans and site photos."
+    },
+    {
+      "id": "vector-route-dashboard",
+      "client_id": "vector-freight",
+      "name": "Route dashboard",
+      "summary": "Ops dashboard for live routes; client reports bugs with screenshots."
+    },
+    {
+      "id": "vector-driver-pilot",
+      "client_id": "vector-freight",
+      "name": "Driver app pilot",
+      "summary": "Pilot of the driver mobile app with a subset of drivers; pilot date is client-driven."
+    },
+    {
+      "id": "lumen-website",
+      "client_id": "lumen-clinic",
+      "name": "Website refresh",
+      "summary": "Refresh of the clinic marketing site; a quote for added pages is outstanding."
+    },
+    {
+      "id": "lumen-booking",
+      "client_id": "lumen-clinic",
+      "name": "Booking integration",
+      "summary": "Online booking integration with the clinic's scheduling system."
+    }
+  ],
+  "model_profiles": [
+    {
+      "id": "claude-haiku",
+      "provider": "anthropic",
+      "model_name": "claude-haiku-5-5",
+      "label": "Claude Haiku 5.5 (fast)",
+      "stages": ["reason", "review"],
+      "cost_in_per_mtok": 0.1,
+      "cost_out_per_mtok": 0.5
+    },
+    {
+      "id": "claude-sonnet",
+      "provider": "anthropic",
+      "model_name": "claude-sonnet-5-5",
+      "label": "Claude Sonnet 5.5",
+      "stages": ["reason", "review"],
+      "cost_in_per_mtok": 2,
+      "cost_out_per_mtok": 10
+    },
+    {
+      "id": "claude-opus",
+      "provider": "anthropic",
+      "model_name": "claude-opus-5-5",
+      "label": "Claude Opus 5.5 (strong)",
+      "stages": ["reason", "review"],
+      "cost_in_per_mtok": 4,
+      "cost_out_per_mtok": 20
+    }
+  ],
+  "default_model_prefs": { "reason": "claude-sonnet", "review": "claude-opus" },
+  "eval_pairs": [
+    { "reason": "claude-sonnet", "review": "claude-opus" },
+    { "reason": "claude-haiku", "review": "claude-sonnet" }
+  ]
+}

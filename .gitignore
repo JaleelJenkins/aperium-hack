@@ -1,0 +1,13 @@
+node_modules/
+.next/
+out/
+next-env.d.ts
+*.tsbuildinfo
+
+# local data: SQLite DB, downloaded attachments, OAuth tokens live here
+data/
+
+.env
+.env.local
+.env*.local
+.DS_Store

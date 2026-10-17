@@ -1,2 +1,195 @@
-# aperium-hack
-Hackathon event
+# Client Pulse
+
+**Every AI claim about a client project is evidence-backed, model-reviewed and human-approved — and here is the scoreboard that shows which model you can trust with your data.**
+
+Client Pulse turns a shared Gmail inbox into a live view of every client project. Each inbound email and attachment is parsed, matched to a client and project, and folded into a running project state: open asks, commitments, deadlines, decisions, risks. A second model reviews every claim against its evidence before it is shown. The system proposes next actions (draft reply or internal task); a person approves, edits or rejects each one, and only approved actions run — as Gmail drafts, never sends.
+
+6-hour hackathon build for Aperium AI. Full spec: *Client Pulse — PRD* (Oct 17, 2026).
+
+## Win conditions
+
+- An email sent to the test inbox appears on the dashboard, filed to the right client and project, **within 60 seconds**.
+- Every signal, insight and action links to its evidence: an **email line, PDF page or image**.
+- A review model checks every claim before it is shown and **blocks unsupported ones**, logging the reason.
+- Users **choose the model** for Reason and for Review; a **scoreboard** compares models on our labeled seed set.
+- Nothing leaves without human approval; approved replies land as **Gmail drafts in the thread**.
+
+Demo bar: no mocked step in the core loop · best model files ≥90% of seed emails to the right project · review blocks ≥3 of 4 planted traps · a judge reaches the source of any card in two clicks.
+
+## Pipeline
+
+```
+ Gmail inbox ─► Ingest ─► Extract ─► Resolve ─► Reason ─► Model review ─► Store
+   (OAuth)    (poll,     (PDF,     (client +   (signals,  (pass / revise   (projects,
+              clean,     images,   project)    insights,   / block)         evidence,
+              store)     text)                 actions)       ▲              audit)
+                                                  ▲           │                │
+                                                  └─ Model router (user's choice per stage)
+                                                                               ▼
+                    Gmail drafts ◄── Executor ◄── Human review ◄── Dashboard
+                  (in thread, never   (approved    (approve,      (portfolio,
+                     auto-send)      actions only)  edit, reject)  project views)
+```
+
+Each stage picks up `messages.status` from the previous one: `ingested → extracted → resolved → reasoned → reviewed`.
+
+## Status (P0 only ships; P1 stretch; P2 roadmap slide)
+
+| Area | Requirement | Pri | Status | Where |
+|---|---|---|---|---|
+| **F1 Connect & ingest** | Google OAuth for one inbox, tokens encrypted at rest | P0 | ✅ | `src/app/api/auth/google/*`, `src/lib/crypto.ts` |
+| | Poll `users.history.list` every 10s + "Sync now" | P0 | ✅ | `worker/ingest.ts`, `src/lib/ingest/sync.ts` |
+| | Store raw message, strip quotes/signatures, download attachments | P0 | ✅ | `src/lib/ingest/{parse,clean,store}.ts` |
+| | Disconnect wipes tokens and stored mail | P0 | ✅ | `src/app/api/auth/google/disconnect` |
+| | Gmail push (`users.watch` + Pub/Sub) | P2 | — | |
+| **F2 Extraction** | Email body → clean text | P0 | ✅ | `src/lib/ingest/clean.ts` |
+| | PDF to model as document, page numbers kept | P0 | ⬜ | `src/lib/pipeline/extract.ts` (planned) |
+| | Image: vision description + text | P0 | ⬜ | `src/lib/pipeline/extract.ts` (planned) |
+| | Audio, video, links | P2 | recorded, not downloaded | |
+| **F3 Resolution** | Client by sender domain; free-mail by contact (seed) | P0 | ⬜ data ready | `clients`, `contacts`, `seed/seed.json` |
+| | Reply inherits thread's project | P0 | ⬜ data ready | `threads.project_id` |
+| | New thread matched with confidence; below 0.7 → "new project?" card | P0 | ⬜ | `PROJECT_MATCH_THRESHOLD` in `contracts.ts` |
+| **F4 State & insights** | Incremental project state update | P0 | ⬜ | `projects`, `signals` |
+| | Insight rules: unanswered ask, deadline w/o commitment, overdue commitment | P0 | ⬜ | `insights` |
+| **F5 Action queue** | Draft reply + internal task; proposed → approved/edited/rejected → executed/failed; reject needs a reason | P0 | ⬜ | `actions` |
+| | Executor calls `drafts.create` in thread only, never `messages.send` | P0 | ⬜ scope granted | `gmail.compose` |
+| | Every decision audited | P0 | ✅ table + helper | `audit_events`, `audit()` |
+| **F6 Views** | Portfolio · Project page · Action inbox · Evidence drawer · Caught by review · Scoreboard | P0 | ⬜ | `src/app/` |
+| | Message source view with line anchors (evidence target) | P0 | ✅ | `src/app/messages/[id]` |
+| | Activity & audit feed | P1 | ⬜ | |
+| **F7 Review & eval** | Output + review contracts | P0 | ✅ | `src/lib/contracts.ts` |
+| | Server drops AI items without valid evidence | P0 | ✅ | `src/lib/evidence.ts` → `keepSupported()` |
+| | Model profiles + per-stage user choice | P0 | ✅ data, ⬜ router + settings UI | `model_profiles`, `user_model_prefs` |
+| | Labeled seed set + eval runner + scoreboard | P0 | ⬜ template ready | `seed/labels.json`, `eval_runs` |
+
+## Setup
+
+Requires Node 20+.
+
+```bash
+git clone https://github.com/JaleelJenkins/aperium-hack && cd aperium-hack
+npm install
+cp .env.example .env.local
+openssl rand -base64 32          # paste into TOKEN_ENCRYPTION_KEY
+npm run seed                     # 3 clients, 5 projects, model profiles
+npm run dev                      # dashboard → http://localhost:3000
+npm run worker                   # second terminal: polls Gmail every 10s
+```
+
+Then click **Connect Gmail** and sign in as the test inbox. The worker pulls the last 7 days of inbox mail, then picks up new mail on every poll; the inbox view refreshes itself every 5s.
+
+### Environment (`.env.local`)
+
+| Variable | Needed for | Notes |
+|---|---|---|
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Gmail | OAuth client (Web application) |
+| `GOOGLE_REDIRECT_URI` | Gmail | default `http://localhost:3000/api/auth/google/callback` |
+| `TOKEN_ENCRYPTION_KEY` | Gmail | 32 bytes, base64 or hex: `openssl rand -base64 32` |
+| `ANTHROPIC_API_KEY` | Extract, Reason, Review | |
+| `DATA_DIR` | storage | SQLite DB + attachments, default `./data` (gitignored) |
+| `POLL_INTERVAL_MS` | worker | default `10000` |
+| `BOOTSTRAP_DAYS`, `BOOTSTRAP_MAX_MESSAGES`, `MAX_ATTACHMENT_BYTES` | worker | defaults 7, 100, 20 MB |
+
+### Google Cloud (once, ~5 min)
+
+1. [console.cloud.google.com](https://console.cloud.google.com) → new project → **APIs & Services → Library** → enable **Gmail API**.
+2. **OAuth consent screen** → External → leave in **Testing** → add **every demo inbox as a Test user**.
+3. **Credentials → Create credentials → OAuth client ID** → Web application → add the redirect URI above.
+4. Copy the client ID and secret into `.env.local`.
+
+`gmail.readonly` and `gmail.compose` are restricted scopes, so the app stays in Testing mode. **Testing-mode refresh tokens expire after ~7 days — reconnect on demo morning.**
+
+### Seed data
+
+- `seed/seed.json` — the three demo clients (Harbor & Pine Architects, Vector Freight, Lumen Clinic), five projects, three Claude model profiles, default model choice (Reason: Sonnet, Review: Opus) and the two eval pairs. **Replace the `CHANGE_ME` contact addresses with the teammates' addresses that will send the seed emails**; `npm run seed` warns until you do.
+- `seed/labels.json` — ground truth for the eval: correct project, asks, deadlines and trap per seed email. The four planted traps are templated; write the ~15 emails in hour 0 and fill in the labels.
+
+| Planted trap | Unsupported claim it tempts | Project |
+|---|---|---|
+| Email says 3 floors, PDF shows 2 | Scope taken from the email alone | Harbor lobby redesign |
+| "Next Friday" in an old forwarded email | A wrong deadline | Vector driver app pilot |
+| Price we proposed, never accepted | "Client approved the quote" | Lumen website refresh |
+| "Send all invoices to this new address" | Outbound action to an unknown contact | Lumen booking integration |
+
+## Scripts
+
+```bash
+npm run dev            # Next.js dashboard + API routes
+npm run worker         # ingest loop (seeds an empty DB on first start)
+npm run worker:once    # one ingest pass
+npm run seed           # upsert seed/seed.json (safe to re-run)
+npm run db:reset       # back to clean demo state; keeps Gmail connected (-- --all to disconnect)
+npm test               # 27 tests: cleaner, parser, sync, evidence, contracts, crypto, seed
+npm run typecheck
+npm run build
+```
+
+## Data model
+
+SQLite (WAL, shared by the web app and the worker) at `data/client-pulse.db`, schema in `src/lib/db.ts`. Plain SQL types, so it ports to Supabase/Postgres.
+
+| Table | Key fields |
+|---|---|
+| `clients` | id, name, domains |
+| `contacts` | email, name, client_id |
+| `projects` | id, client_id, name, summary, health (`on_track`/`at_risk`/`blocked`), status, sentiment_trend, last_contact_at |
+| `threads` | gmail_thread_id, project_id, assignment_confidence |
+| `messages` | gmail_message_id, thread_id, sender, sent_at, received_at, raw_text, **clean_text**, status |
+| `attachments` | id, message_id, mime_type, kind (`pdf`/`image`/`audio`/`video`/`other`), storage_path, sha256, extracted_text, meta (pages, page text) |
+| `signals` | id, project_id, type (ask, our/their commitment, deadline, decision, risk), text, due_at, evidence, produced_by_model, review_verdict |
+| `insights` | id, project_id, kind, severity, text, evidence, status, produced_by_model, review_verdict |
+| `actions` | id, project_id, type, payload, status, evidence, produced_by_model, review_verdict, decided_by/at, decision_reason, gmail_draft_id |
+| `model_reviews` | target_type/id, reviewer_model, verdict (`pass`/`revise`/`block`), score, notes, claim — feeds "Caught by review" |
+| `model_profiles` | provider, model_name, stages, cost per MTok |
+| `user_model_prefs` | user_id, stage (`reason`/`review`), model_profile_id |
+| `eval_runs` | reason/review profile, metrics (project accuracy, signal recall, unsupported shown, traps caught, latency, cost) |
+| `audit_events` | actor, verb, object_ref, at |
+| `gmail_accounts` | encrypted tokens, history cursor, last sync/error |
+
+## Contracts (lock in hour 0)
+
+All in `src/lib/contracts.ts` as zod schemas, so prompts and the server agree on one shape.
+
+- **Evidence** — one of: `{kind:"message", message_id, quote}` · `{kind:"attachment_page", attachment_id, page, quote?}` · `{kind:"attachment_region", attachment_id, region?, quote?}` · `{kind:"attachment_time", attachment_id, start_s, end_s}` (P2). Quotes must be verbatim from `messages.clean_text` or the attachment's extracted text.
+- **Reason output** (per message) — `client_guess`, `project_match` (existing id or new, with confidence), `project_summary`, `signals[]`, `insights[]`, `actions[]`; every item carries ≥1 evidence.
+- **Review output** — per item: `pass | revise | block`, score, one-line reason.
+- **Evidence or it doesn't ship** — `keepSupported(db, items)` re-checks every pointer (message exists and contains the quote; PDF page in range and contains the quote; region on an image) and drops items left with none. `evidenceHref()` turns evidence into a link that lands on the exact line or PDF page.
+
+## Trust rules (from the PRD)
+
+- Outbound is **drafts only**, after human approval, logged. The executor never calls `messages.send`.
+- **Email is data, not instructions.** "Send invoices to this new address" becomes a risk insight, never an action. Actions only target the thread's known contacts.
+- **Low confidence goes to a person** — uncertain project matches become queue cards.
+- Tokens encrypted at rest; disconnect wipes tokens and stored mail; inbox data is never used for training.
+
+## Build plan and owners
+
+| Hours | Work |
+|---|---|
+| 0–0.5 | Lock schema and contracts ✅ · write and label seed emails and traps · confirm OAuth on the test inbox |
+| 0.5–2.5 | Ingest ✅ · text, PDF and image extraction · client/project resolution · dashboard skeleton |
+| 2.5–4 | Reason and Review behind the model router · project page, evidence drawer, Caught by review · action inbox → Gmail drafts |
+| 4–5 | Eval runner and scoreboard · second model profile · run eval, fix worst misses |
+| 5–6 | **Feature freeze** · `npm run db:reset` · two rehearsals · record fallback video |
+
+| Role | Owns |
+|---|---|
+| Backend & ingest | OAuth, polling, attachments, draft executor, seed reset |
+| AI pipeline | Reason and Review prompts, output schemas, model router, eval runner |
+| Frontend | Portfolio, project page, evidence drawer, action inbox, Caught by review, scoreboard |
+| Product & demo | Seed emails, labels and traps, demo script, pitch, QA |
+
+## Demo checklist
+
+- [ ] Every demo inbox added as an OAuth test user; **reconnected the morning of the demo**
+- [ ] `CHANGE_ME` contacts replaced; seed emails sent; `labels.json` filled
+- [ ] Eval run before the demo (not live); scoreboard precomputed
+- [ ] `npm run db:reset`, then let the worker ingest the seed set
+- [ ] Fallback: preloaded DB copy (`data/`) and screen recording of the live-email step
+
+## Open questions (from the PRD)
+
+- How many people, and are the 6 hours continuous?
+- Test inbox address, and who holds its login?
+- Judging criteria — repo, video or live demo?
+- Which two model pairs do we compare, and do we have keys for both? (Defaults: Sonnet→Opus vs Haiku→Sonnet.)

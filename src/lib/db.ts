@@ -1,0 +1,261 @@
+import fs from "node:fs";
+import path from "node:path";
+import Database from "better-sqlite3";
+import { config } from "./config";
+
+export type DB = Database.Database;
+
+/**
+ * Data model from the PRD ("Architecture, data model and stack"), plus
+ * gmail_accounts for OAuth state and eval_runs for the scoreboard.
+ *
+ * Pipeline position of a message lives in messages.status:
+ *   ingested → extracted → resolved → reasoned → reviewed   (or failed)
+ * Each stage picks up rows in the previous status and advances them.
+ *
+ * Every AI-made row (signals, insights, actions) carries evidence_json,
+ * produced_by_model and review_verdict. Plain SQL types throughout so the
+ * schema ports to Supabase/Postgres with minor edits (TEXT JSON → jsonb).
+ */
+const MIGRATIONS: string[] = [
+  /* 001 */ `
+  -- ---------------------------------------------------------------- inbox
+  CREATE TABLE gmail_accounts (
+    email          TEXT PRIMARY KEY,
+    refresh_token  TEXT NOT NULL,        -- AES-256-GCM encrypted (see lib/crypto.ts)
+    access_token   TEXT,                 -- encrypted
+    expiry_date    INTEGER,
+    scope          TEXT,
+    history_id     TEXT,                 -- Gmail history cursor; NULL = bootstrap on next sync
+    last_synced_at TEXT,
+    last_error     TEXT,
+    created_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  );
+
+  -- ------------------------------------------------------- clients/projects
+  CREATE TABLE clients (
+    id           TEXT PRIMARY KEY,
+    name         TEXT NOT NULL,
+    domains_json TEXT NOT NULL DEFAULT '[]'  -- sender domains that identify this client
+  );
+
+  CREATE TABLE contacts (
+    email     TEXT PRIMARY KEY,              -- lowercased
+    name      TEXT,
+    client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE projects (
+    id              TEXT PRIMARY KEY,
+    client_id       TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+    name            TEXT NOT NULL,
+    summary         TEXT NOT NULL DEFAULT '',
+    health          TEXT NOT NULL DEFAULT 'on_track',  -- on_track | at_risk | blocked
+    status          TEXT NOT NULL DEFAULT 'active',    -- active | proposed | archived
+    sentiment_trend TEXT,                              -- improving | steady | declining
+    last_contact_at TEXT,
+    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  );
+  CREATE INDEX projects_client_idx ON projects(client_id);
+
+  -- ------------------------------------------------------------- messages
+  CREATE TABLE threads (
+    gmail_thread_id       TEXT PRIMARY KEY,
+    account               TEXT NOT NULL,
+    subject               TEXT,
+    project_id            TEXT REFERENCES projects(id) ON DELETE SET NULL,  -- set by Resolve; replies inherit it
+    assignment_confidence REAL,
+    first_message_at      TEXT,
+    last_message_at       TEXT
+  );
+  CREATE INDEX threads_project_idx ON threads(project_id);
+
+  CREATE TABLE messages (
+    gmail_message_id  TEXT PRIMARY KEY,
+    thread_id         TEXT NOT NULL REFERENCES threads(gmail_thread_id),
+    account           TEXT NOT NULL,
+    rfc_message_id    TEXT,                -- Message-ID header; drafts reply In-Reply-To this
+    in_reply_to       TEXT,
+    references_header TEXT,
+    sender_email      TEXT,
+    sender_name       TEXT,
+    to_json           TEXT NOT NULL DEFAULT '[]',
+    cc_json           TEXT NOT NULL DEFAULT '[]',
+    subject           TEXT,
+    sent_at           TEXT,                -- Date header
+    received_at       TEXT NOT NULL,       -- Gmail internalDate; latency is measured from here
+    snippet           TEXT,
+    label_ids         TEXT NOT NULL DEFAULT '[]',
+    body_source       TEXT NOT NULL,       -- text/plain | text/html | none
+    raw_text          TEXT NOT NULL,       -- full text before cleaning (keeps quoted history)
+    clean_text        TEXT NOT NULL,       -- new content only; evidence quotes must appear here
+    status            TEXT NOT NULL DEFAULT 'ingested',
+    error             TEXT,
+    ingested_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  );
+  CREATE INDEX messages_status_idx   ON messages(status);
+  CREATE INDEX messages_thread_idx   ON messages(thread_id);
+  CREATE INDEX messages_received_idx ON messages(received_at DESC);
+
+  CREATE TABLE attachments (
+    id                  TEXT PRIMARY KEY,  -- <gmail_message_id>:<partId>
+    message_id          TEXT NOT NULL REFERENCES messages(gmail_message_id) ON DELETE CASCADE,
+    part_id             TEXT NOT NULL,
+    gmail_attachment_id TEXT,
+    filename            TEXT NOT NULL,
+    mime_type           TEXT NOT NULL,
+    size                INTEGER NOT NULL DEFAULT 0,
+    kind                TEXT NOT NULL,     -- pdf | image | audio | video | other
+    is_inline           INTEGER NOT NULL DEFAULT 0,
+    content_id          TEXT,
+    sha256              TEXT,
+    storage_path        TEXT,              -- relative to DATA_DIR
+    status              TEXT NOT NULL,     -- stored | skipped | failed | extracted
+    error               TEXT,
+    extracted_text      TEXT,              -- set by Extract
+    meta_json           TEXT               -- set by Extract: {"pages": n, "pageText": [...]} / image description
+  );
+  CREATE INDEX attachments_message_idx ON attachments(message_id);
+
+  -- ---------------------------------------------------- AI-made objects
+  CREATE TABLE signals (
+    id                TEXT PRIMARY KEY,
+    project_id        TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    message_id        TEXT REFERENCES messages(gmail_message_id) ON DELETE SET NULL,
+    type              TEXT NOT NULL,       -- ask | our_commitment | their_commitment | deadline | decision | risk
+    text              TEXT NOT NULL,
+    due_at            TEXT,
+    status            TEXT NOT NULL DEFAULT 'open',   -- open | done | superseded
+    evidence_json     TEXT NOT NULL,       -- Evidence[] (lib/contracts.ts); never empty
+    produced_by_model TEXT NOT NULL,
+    review_verdict    TEXT,                -- pass | revise | block
+    created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  );
+  CREATE INDEX signals_project_idx ON signals(project_id, type);
+
+  CREATE TABLE insights (
+    id                TEXT PRIMARY KEY,
+    project_id        TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    kind              TEXT NOT NULL,       -- unanswered_ask | deadline_no_commitment | overdue_commitment | scope_change | sentiment_drop | missing_info
+    severity          TEXT NOT NULL,       -- low | medium | high
+    text              TEXT NOT NULL,
+    suggested_action  TEXT,
+    status            TEXT NOT NULL DEFAULT 'open',   -- open | resolved | dismissed
+    evidence_json     TEXT NOT NULL,
+    produced_by_model TEXT NOT NULL,       -- model id, or 'rule' for deterministic checks
+    review_verdict    TEXT,
+    created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  );
+  CREATE INDEX insights_project_idx ON insights(project_id, status);
+
+  CREATE TABLE actions (
+    id                TEXT PRIMARY KEY,
+    project_id        TEXT REFERENCES projects(id) ON DELETE CASCADE,
+    thread_id         TEXT REFERENCES threads(gmail_thread_id),
+    type              TEXT NOT NULL,       -- draft_reply | internal_task | new_project
+    payload_json      TEXT NOT NULL,       -- draft: {to, subject, body}; task: {title, notes}
+    status            TEXT NOT NULL DEFAULT 'proposed',  -- proposed | approved | edited | rejected | executed | failed
+    evidence_json     TEXT NOT NULL,
+    produced_by_model TEXT NOT NULL,
+    review_verdict    TEXT,
+    decided_by        TEXT,
+    decided_at        TEXT,
+    decision_reason   TEXT,                -- required on reject
+    gmail_draft_id    TEXT,                -- set by Executor (drafts.create only, never send)
+    error             TEXT,
+    created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  );
+  CREATE INDEX actions_status_idx ON actions(status);
+
+  CREATE TABLE model_reviews (
+    id             TEXT PRIMARY KEY,
+    target_type    TEXT NOT NULL,          -- signal | insight | action
+    target_id      TEXT NOT NULL,
+    reviewer_model TEXT NOT NULL,
+    verdict        TEXT NOT NULL,          -- pass | revise | block
+    score          REAL,
+    notes          TEXT,                   -- one-line reason; shown in "Caught by review"
+    claim_json     TEXT,                   -- the claim as Reason produced it (blocked items never reach their table)
+    at             TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  );
+  CREATE INDEX model_reviews_verdict_idx ON model_reviews(verdict);
+
+  -- ------------------------------------------------- models and scoreboard
+  CREATE TABLE model_profiles (
+    id          TEXT PRIMARY KEY,
+    provider    TEXT NOT NULL,             -- anthropic | openai | ...
+    model_name  TEXT NOT NULL,
+    label       TEXT NOT NULL,
+    stages_json TEXT NOT NULL,             -- ["reason","review"]
+    cost_in_per_mtok  REAL,                -- USD per million input tokens, for the cost metric
+    cost_out_per_mtok REAL,
+    enabled     INTEGER NOT NULL DEFAULT 1
+  );
+
+  CREATE TABLE user_model_prefs (
+    user_id          TEXT NOT NULL,
+    stage            TEXT NOT NULL,        -- reason | review
+    model_profile_id TEXT NOT NULL REFERENCES model_profiles(id),
+    PRIMARY KEY (user_id, stage)
+  );
+
+  CREATE TABLE eval_runs (
+    id                TEXT PRIMARY KEY,
+    reason_profile_id TEXT NOT NULL REFERENCES model_profiles(id),
+    review_profile_id TEXT NOT NULL REFERENCES model_profiles(id),
+    started_at        TEXT NOT NULL,
+    finished_at       TEXT,
+    metrics_json      TEXT,                -- project_accuracy, signal_recall, unsupported_shown, traps_caught, latency_p50_s, cost_per_email_usd
+    results_json      TEXT                 -- per seed email detail
+  );
+
+  -- ----------------------------------------------------------------- audit
+  CREATE TABLE audit_events (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    actor       TEXT NOT NULL,             -- worker | user:<id> | <model id>
+    verb        TEXT NOT NULL,             -- e.g. message.ingested, action.approved
+    object_ref  TEXT,                      -- e.g. message:<id>, action:<id>
+    detail_json TEXT,
+    at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  );
+  CREATE INDEX audit_object_idx ON audit_events(object_ref);
+  `,
+];
+
+export function openDb(file: string): DB {
+  if (file !== ":memory:") fs.mkdirSync(path.dirname(file), { recursive: true });
+  const db = new Database(file);
+  db.pragma("journal_mode = WAL"); // worker and web app share the file
+  db.pragma("busy_timeout = 5000");
+  db.pragma("foreign_keys = ON");
+  migrate(db);
+  return db;
+}
+
+function migrate(db: DB): void {
+  const current = db.pragma("user_version", { simple: true }) as number;
+  for (let v = current; v < MIGRATIONS.length; v++) {
+    db.transaction(() => {
+      db.exec(MIGRATIONS[v]);
+      db.pragma(`user_version = ${v + 1}`);
+    })();
+  }
+}
+
+const g = globalThis as unknown as { __clientPulseDb?: DB };
+
+/** Process-wide connection (survives Next.js dev hot reloads). */
+export function getDb(): DB {
+  if (!g.__clientPulseDb) g.__clientPulseDb = openDb(config.dbPath);
+  return g.__clientPulseDb;
+}
+
+/** Append to audit_events. objectRef is "<type>:<id>", e.g. "message:18f3a". */
+export function audit(db: DB, actor: string, verb: string, objectRef: string | null, detail?: unknown): void {
+  db.prepare(`INSERT INTO audit_events (actor, verb, object_ref, detail_json) VALUES (?, ?, ?, ?)`).run(
+    actor,
+    verb,
+    objectRef,
+    detail === undefined ? null : JSON.stringify(detail),
+  );
+}
