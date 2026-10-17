@@ -1,40 +1,100 @@
 /**
- * Evidence anchors. Every signal, insight and action downstream must point at
- * one of these so a judge can reach the source in two clicks.
- *
- *   email:<messageId>#L<line>[-L<line>]   a line range of emails.body_clean
- *   attachment:<attachmentId>#p<page>     a PDF page (Extract fills page text)
- *   attachment:<attachmentId>             an image
+ * "Evidence or it doesn't ship": the server checks every pointer an AI item
+ * cites before the item is stored, and drops items left with none. It also
+ * turns evidence into dashboard links so a judge reaches the source in two
+ * clicks.
  */
+import type { DB } from "./db";
+import type { Evidence } from "./contracts";
 
-export function bodyLines(bodyClean: string): string[] {
-  return bodyClean.split("\n");
+const norm = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
+
+/** 1-based line in clean_text where the quote starts, or null if it isn't there. */
+export function quoteLine(cleanText: string, quote: string): number | null {
+  const q = norm(quote);
+  if (!q) return null;
+  // Normalize line by line, remembering where each line starts in the joined
+  // text, so a quote spanning lines maps back to the line it starts on.
+  const starts: number[] = [];
+  let joined = "";
+  cleanText.split("\n").forEach((line, i) => {
+    const n = norm(line);
+    if (i > 0 && joined && n) joined += " ";
+    starts.push(joined.length);
+    joined += n;
+  });
+  const at = joined.indexOf(q);
+  if (at < 0) return null;
+  let line = 0;
+  while (line + 1 < starts.length && starts[line + 1] <= at) line++;
+  return line + 1;
 }
 
-export function emailLineRef(emailId: string, from: number, to?: number): string {
-  return to && to !== from ? `email:${emailId}#L${from}-L${to}` : `email:${emailId}#L${from}`;
-}
+export type EvidenceCheck = { ok: true } | { ok: false; reason: string };
 
-export type EvidenceRef =
-  | { type: "email"; emailId: string; from: number; to: number }
-  | { type: "attachment"; attachmentId: string; page?: number };
-
-export function parseEvidenceRef(ref: string): EvidenceRef | null {
-  let m = /^email:([^#]+)#L(\d+)(?:-L(\d+))?$/.exec(ref);
-  if (m) {
-    const from = Number(m[2]);
-    return { type: "email", emailId: m[1], from, to: m[3] ? Number(m[3]) : from };
+export function checkEvidence(db: DB, ev: Evidence): EvidenceCheck {
+  if (ev.kind === "message") {
+    const m = db.prepare(`SELECT clean_text FROM messages WHERE gmail_message_id = ?`).get(ev.message_id) as
+      | { clean_text: string }
+      | undefined;
+    if (!m) return { ok: false, reason: `unknown message ${ev.message_id}` };
+    return norm(m.clean_text).includes(norm(ev.quote))
+      ? { ok: true }
+      : { ok: false, reason: "quote not found in message" };
   }
-  m = /^attachment:([^#]+)(?:#p(\d+))?$/.exec(ref);
-  if (m) return { type: "attachment", attachmentId: m[1], page: m[2] ? Number(m[2]) : undefined };
-  return null;
+
+  const a = db.prepare(`SELECT kind, status, extracted_text, meta_json FROM attachments WHERE id = ?`).get(ev.attachment_id) as
+    | { kind: string; status: string; extracted_text: string | null; meta_json: string | null }
+    | undefined;
+  if (!a) return { ok: false, reason: `unknown attachment ${ev.attachment_id}` };
+  if (a.status !== "stored" && a.status !== "extracted") return { ok: false, reason: "attachment was not stored" };
+
+  if (ev.kind === "attachment_page") {
+    if (a.kind !== "pdf") return { ok: false, reason: "page evidence on a non-PDF" };
+    const meta = a.meta_json ? (JSON.parse(a.meta_json) as { pages?: number; pageText?: string[] }) : {};
+    if (meta.pages && ev.page > meta.pages) return { ok: false, reason: `page ${ev.page} > ${meta.pages}` };
+    if (ev.quote && meta.pageText?.[ev.page - 1] !== undefined && !norm(meta.pageText[ev.page - 1]).includes(norm(ev.quote))) {
+      return { ok: false, reason: `quote not found on page ${ev.page}` };
+    }
+    return { ok: true };
+  }
+  if (ev.kind === "attachment_region") {
+    return a.kind === "image" ? { ok: true } : { ok: false, reason: "region evidence on a non-image" };
+  }
+  return ev.end_s >= ev.start_s ? { ok: true } : { ok: false, reason: "end before start" };
 }
 
-/** Dashboard URL for a reference. */
-export function evidenceHref(ref: string): string | null {
-  const r = parseEvidenceRef(ref);
-  if (!r) return null;
-  if (r.type === "email") return `/emails/${encodeURIComponent(r.emailId)}#L${r.from}`;
-  const base = `/api/attachments/${encodeURIComponent(r.attachmentId)}`;
-  return r.page ? `${base}#page=${r.page}` : base;
+/**
+ * Keep only the evidence that checks out; drop items left with none.
+ * Returns what was dropped so it can be logged.
+ */
+export function keepSupported<T extends { evidence: Evidence[] }>(
+  db: DB,
+  items: T[],
+): { kept: T[]; dropped: { item: T; reasons: string[] }[] } {
+  const kept: T[] = [];
+  const dropped: { item: T; reasons: string[] }[] = [];
+  for (const item of items) {
+    const reasons: string[] = [];
+    const valid = item.evidence.filter((ev) => {
+      const r = checkEvidence(db, ev);
+      if (!r.ok) reasons.push(r.reason);
+      return r.ok;
+    });
+    if (valid.length) kept.push({ ...item, evidence: valid });
+    else dropped.push({ item, reasons });
+  }
+  return { kept, dropped };
+}
+
+/** Dashboard link for a piece of evidence. Pass the message's clean_text to land on the exact line. */
+export function evidenceHref(ev: Evidence, cleanText?: string): string {
+  if (ev.kind === "message") {
+    const line = cleanText ? quoteLine(cleanText, ev.quote) : null;
+    return `/messages/${encodeURIComponent(ev.message_id)}${line ? `#L${line}` : ""}`;
+  }
+  const base = `/api/attachments/${encodeURIComponent(ev.attachment_id)}`;
+  if (ev.kind === "attachment_page") return `${base}#page=${ev.page}`;
+  if (ev.kind === "attachment_time") return `${base}#t=${ev.start_s},${ev.end_s}`;
+  return base;
 }

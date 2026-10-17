@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { parseAddressList, parseGmailMessage } from "../src/lib/ingest/parse";
-import { parseEvidenceRef, evidenceHref } from "../src/lib/evidence";
 import { filePart, message, textPart } from "./helpers";
 
 describe("parseGmailMessage", () => {
@@ -86,15 +85,5 @@ describe("parseAddressList", () => {
       { name: null, email: "bob@y.com" },
       { name: "Ann", email: "ann@z.com" },
     ]);
-  });
-});
-
-describe("evidence refs", () => {
-  it("round-trips email line ranges and attachment pages", () => {
-    expect(parseEvidenceRef("email:18f3a#L4-L6")).toEqual({ type: "email", emailId: "18f3a", from: 4, to: 6 });
-    expect(parseEvidenceRef("attachment:18f3a:1#p3")).toEqual({ type: "attachment", attachmentId: "18f3a:1", page: 3 });
-    expect(evidenceHref("email:18f3a#L4")).toBe("/emails/18f3a#L4");
-    expect(evidenceHref("attachment:18f3a:1#p3")).toBe("/api/attachments/18f3a%3A1#page=3");
-    expect(parseEvidenceRef("nonsense")).toBeNull();
   });
 });

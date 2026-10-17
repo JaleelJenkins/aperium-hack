@@ -64,7 +64,7 @@ async function bootstrap(db: DB, api: GmailApi, account: string, opts: SyncOptio
     setCursor(db, account, profile.historyId);
     result.historyId = profile.historyId;
   }
-  audit(db, "worker", "sync.bootstrap", "gmail_account", account, summary(result));
+  audit(db, "worker", "sync.bootstrap", `gmail_account:${account}`, summary(result));
   return result;
 }
 
@@ -98,7 +98,7 @@ async function syncFromHistory(
     } while (pageToken);
   } catch (err) {
     if (!isHistoryExpired(err)) throw err;
-    audit(db, "worker", "sync.history_expired", "gmail_account", account, { startHistoryId });
+    audit(db, "worker", "sync.history_expired", `gmail_account:${account}`, { startHistoryId });
     setCursor(db, account, null);
     return bootstrap(db, api, account, opts);
   }
@@ -110,7 +110,7 @@ async function syncFromHistory(
   } else {
     result.historyId = startHistoryId;
   }
-  if (ids.length) audit(db, "worker", "sync.history", "gmail_account", account, summary(result));
+  if (ids.length) audit(db, "worker", "sync.history", `gmail_account:${account}`, summary(result));
   return result;
 }
 

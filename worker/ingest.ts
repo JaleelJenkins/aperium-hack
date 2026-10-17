@@ -11,6 +11,7 @@ import { config } from "../src/lib/config";
 import { getDb } from "../src/lib/db";
 import { listAccounts } from "../src/lib/gmail/client";
 import { syncAll } from "../src/lib/ingest/sync";
+import { applySeed, readSeed } from "../src/lib/seed";
 
 const once = process.argv.includes("--once");
 let stopping = false;
@@ -42,6 +43,11 @@ function log(msg: string): void {
 
 async function main(): Promise<void> {
   log(`db ${config.dbPath}; polling every ${config.pollIntervalMs}ms${once ? " (once)" : ""}`);
+  const db = getDb();
+  if (!(db.prepare(`SELECT 1 FROM clients LIMIT 1`).get())) {
+    for (const w of applySeed(db, readSeed())) log(`seed: ${w}`);
+    log("loaded seed/seed.json (clients, projects, model profiles)");
+  }
   do {
     try {
       await tick();

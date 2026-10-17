@@ -20,7 +20,8 @@ beforeEach(() => {
 });
 
 const cursor = () => (db.prepare(`SELECT history_id FROM gmail_accounts`).get() as { history_id: string | null }).history_id;
-const emailIds = () => (db.prepare(`SELECT id FROM emails ORDER BY received_at`).all() as { id: string }[]).map((r) => r.id);
+const emailIds = () =>
+  (db.prepare(`SELECT gmail_message_id AS id FROM messages ORDER BY received_at`).all() as { id: string }[]).map((r) => r.id);
 
 describe("syncAccount", () => {
   it("bootstraps existing inbox mail, oldest first, then sets the history cursor", async () => {
@@ -85,7 +86,7 @@ describe("syncAccount", () => {
     const r = await syncAccount(db, gmail, ACCOUNT, opts());
     expect(r.mode).toBe("bootstrap");
     expect(r.newEmailIds).toEqual(["b"]);
-    const actions = (db.prepare(`SELECT action FROM audit_log`).all() as { action: string }[]).map((x) => x.action);
+    const actions = (db.prepare(`SELECT verb FROM audit_events`).all() as { verb: string }[]).map((x) => x.verb);
     expect(actions).toContain("sync.history_expired");
   });
 
@@ -106,6 +107,7 @@ describe("syncAccount", () => {
             textPart("text/plain", "Contract attached.", "0"),
             filePart("1", "SOW v2.pdf", "application/pdf", pdf.length, { attachmentId: "att-pdf" }),
             filePart("2", "logo.png", "image/png", 800, { attachmentId: "att-logo", contentId: "logo@x", inline: true }),
+            filePart("4", "voice-memo.m4a", "audio/mp4", 90_000, { attachmentId: "att-audio" }),
             filePart("3", "notes.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", 5000, {
               attachmentId: "att-docx",
             }),
@@ -122,14 +124,16 @@ describe("syncAccount", () => {
       ["SOW v2.pdf", "pdf", "stored"],
       ["logo.png", "image", "skipped"],
       ["notes.docx", "other", "skipped"],
+      ["voice-memo.m4a", "audio", "skipped"],
     ]);
     expect(fs.readFileSync(path.join(dataDir, rows[0].storage_path!)).toString()).toBe("%PDF-1.4 fake");
     expect(rows[0].sha256).toHaveLength(64);
 
-    const email = db.prepare(`SELECT status, body_clean FROM emails WHERE id = 'withfiles'`).get() as {
-      status: string;
-      body_clean: string;
-    };
-    expect(email).toEqual({ status: "ingested", body_clean: "Contract attached." });
+    const msg = db
+      .prepare(`SELECT status, clean_text, thread_id FROM messages WHERE gmail_message_id = 'withfiles'`)
+      .get() as { status: string; clean_text: string; thread_id: string };
+    expect(msg).toMatchObject({ status: "ingested", clean_text: "Contract attached." });
+    const thread = db.prepare(`SELECT subject, project_id FROM threads WHERE gmail_thread_id = ?`).get(msg.thread_id);
+    expect(thread).toEqual({ subject: "Subject withfiles", project_id: null });
   });
 });

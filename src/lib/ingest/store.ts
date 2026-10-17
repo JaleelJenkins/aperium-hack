@@ -11,8 +11,11 @@ export type IngestOutcome = "new" | "exists" | "skipped";
 /** Inline images under this size are almost always signature logos and tracking pixels. */
 const MIN_INLINE_IMAGE_BYTES = 4_000;
 
-export function emailExists(db: DB, id: string): boolean {
-  return !!db.prepare(`SELECT 1 FROM emails WHERE id = ?`).get(id);
+/** Kinds Extract handles in the hackathon build (PRD F2: audio/video are P2). */
+const DOWNLOAD_KINDS = new Set(["pdf", "image"]);
+
+export function messageExists(db: DB, id: string): boolean {
+  return !!db.prepare(`SELECT 1 FROM messages WHERE gmail_message_id = ?`).get(id);
 }
 
 /** Labels that mean the message is ours, not inbound client mail. */
@@ -33,33 +36,33 @@ export async function ingestMessage(
   messageId: string,
   opts: { dataDir?: string } = {},
 ): Promise<IngestOutcome> {
-  if (emailExists(db, messageId)) return "exists";
+  if (messageExists(db, messageId)) return "exists";
 
-  const msg = await api.getMessage(messageId);
-  const parsed = parseGmailMessage(msg);
+  const parsed = parseGmailMessage(await api.getMessage(messageId));
   if (!isInbound(parsed.labelIds)) return "skipped";
 
   const dataDir = opts.dataDir ?? config.dataDir;
   const stored = await Promise.all(parsed.attachments.map((a) => fetchAttachment(api, parsed, a, dataDir)));
 
   const inserted = db.transaction(() => {
-    const res = insertEmail(db, account, parsed);
-    if (res === 0) return false; // another process got here first
+    upsertThread(db, account, parsed);
+    if (insertMessage(db, account, parsed) === 0) return false; // another process got here first
     const ins = db.prepare(
       `INSERT INTO attachments
-        (id, email_id, part_id, gmail_attachment_id, filename, mime_type, size, kind, is_inline,
+        (id, message_id, part_id, gmail_attachment_id, filename, mime_type, size, kind, is_inline,
          content_id, sha256, storage_path, status, error)
-       VALUES (@id, @email_id, @part_id, @gmail_attachment_id, @filename, @mime_type, @size, @kind, @is_inline,
+       VALUES (@id, @message_id, @part_id, @gmail_attachment_id, @filename, @mime_type, @size, @kind, @is_inline,
          @content_id, @sha256, @storage_path, @status, @error)`,
     );
     for (const row of stored) ins.run(row);
-    audit(db, "worker", "email.ingested", "email", parsed.id, {
+    audit(db, "worker", "message.ingested", `message:${parsed.id}`, {
       threadId: parsed.threadId,
       from: parsed.from?.email ?? null,
       subject: parsed.subject,
       bodySource: parsed.bodySource,
       cleanLines: parsed.bodyClean ? parsed.bodyClean.split("\n").length : 0,
       attachments: stored.map((s) => ({ id: s.id, kind: s.kind, status: s.status })),
+      latencyS: Math.round((Date.now() - Date.parse(parsed.receivedAt)) / 100) / 10,
     });
     return true;
   })();
@@ -67,23 +70,38 @@ export async function ingestMessage(
   return inserted ? "new" : "exists";
 }
 
-function insertEmail(db: DB, account: string, e: ParsedEmail): number {
+function upsertThread(db: DB, account: string, e: ParsedEmail): void {
+  db.prepare(
+    `INSERT INTO threads (gmail_thread_id, account, subject, first_message_at, last_message_at)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(gmail_thread_id) DO UPDATE SET
+       first_message_at = MIN(first_message_at, excluded.first_message_at),
+       last_message_at  = MAX(last_message_at,  excluded.last_message_at)`,
+  ).run(e.threadId, account, stripReplyPrefix(e.subject), e.receivedAt, e.receivedAt);
+}
+
+function stripReplyPrefix(subject: string | null): string | null {
+  return subject ? subject.replace(/^\s*((re|fw|fwd)\s*:\s*)+/i, "").trim() : null;
+}
+
+function insertMessage(db: DB, account: string, e: ParsedEmail): number {
   return db
     .prepare(
-      `INSERT OR IGNORE INTO emails
-        (id, account, thread_id, rfc_message_id, in_reply_to, references_header, from_name, from_email,
-         to_json, cc_json, subject, sent_at, received_at, snippet, label_ids, body_source, body_raw, body_clean)
+      `INSERT OR IGNORE INTO messages
+        (gmail_message_id, thread_id, account, rfc_message_id, in_reply_to, references_header,
+         sender_email, sender_name, to_json, cc_json, subject, sent_at, received_at, snippet,
+         label_ids, body_source, raw_text, clean_text)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       e.id,
-      account,
       e.threadId,
+      account,
       e.rfcMessageId,
       e.inReplyTo,
       e.references,
-      e.from?.name ?? null,
       e.from?.email ?? null,
+      e.from?.name ?? null,
       JSON.stringify(e.to),
       JSON.stringify(e.cc),
       e.subject,
@@ -99,7 +117,7 @@ function insertEmail(db: DB, account: string, e: ParsedEmail): number {
 
 interface AttachmentRow {
   id: string;
-  email_id: string;
+  message_id: string;
   part_id: string;
   gmail_attachment_id: string | null;
   filename: string;
@@ -122,7 +140,7 @@ async function fetchAttachment(
 ): Promise<AttachmentRow> {
   const row: AttachmentRow = {
     id: `${email.id}:${a.partId}`,
-    email_id: email.id,
+    message_id: email.id,
     part_id: a.partId,
     gmail_attachment_id: a.gmailAttachmentId,
     filename: a.filename,
@@ -137,8 +155,10 @@ async function fetchAttachment(
     error: null,
   };
 
-  // Extract handles PDFs and images; everything else is recorded so it shows up, but not downloaded.
-  if (a.kind === "other") return { ...row, error: "unsupported type" };
+  // Everything is recorded so it shows on the timeline; only what Extract handles is downloaded.
+  if (!DOWNLOAD_KINDS.has(a.kind)) {
+    return { ...row, error: a.kind === "other" ? "unsupported type" : `${a.kind} is on the roadmap (P2)` };
+  }
   if (a.size > config.maxAttachmentBytes) return { ...row, error: `larger than ${config.maxAttachmentBytes} bytes` };
   if (a.kind === "image" && a.isInline && a.size > 0 && a.size < MIN_INLINE_IMAGE_BYTES) {
     return { ...row, error: "small inline image (likely logo or tracker)" };

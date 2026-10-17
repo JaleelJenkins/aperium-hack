@@ -1,5 +1,6 @@
 import { google, type gmail_v1 } from "googleapis";
 import { assertGoogleConfigured, config } from "../config";
+import { decrypt, encrypt } from "../crypto";
 import type { DB } from "../db";
 import { decodeBase64Url } from "../ingest/parse";
 
@@ -31,22 +32,69 @@ export function listAccounts(db: DB): GmailAccountRow[] {
   return db.prepare(`SELECT * FROM gmail_accounts ORDER BY created_at`).all() as GmailAccountRow[];
 }
 
-/** OAuth client for a stored account; refreshed tokens are written back. */
+/** Store (or replace) a connected inbox. Tokens are encrypted before they touch the DB. */
+export function saveAccount(
+  db: DB,
+  email: string,
+  tokens: { refresh_token: string; access_token?: string | null; expiry_date?: number | null; scope?: string | null },
+): void {
+  db.prepare(
+    `INSERT INTO gmail_accounts (email, refresh_token, access_token, expiry_date, scope)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(email) DO UPDATE SET
+       refresh_token = excluded.refresh_token,
+       access_token  = excluded.access_token,
+       expiry_date   = excluded.expiry_date,
+       scope         = excluded.scope,
+       last_error    = NULL`,
+  ).run(
+    email,
+    encrypt(tokens.refresh_token),
+    tokens.access_token ? encrypt(tokens.access_token) : null,
+    tokens.expiry_date ?? null,
+    tokens.scope ?? null,
+  );
+}
+
+/**
+ * Disconnect wipes tokens and stored mail (PRD trust requirements).
+ * Clients, projects, model profiles and the audit trail stay.
+ */
+export function disconnectAccount(db: DB, email: string): { messages: number } {
+  return db.transaction(() => {
+    const msgs = db.prepare(`SELECT COUNT(*) AS n FROM messages WHERE account = ?`).get(email) as { n: number };
+    const inAccount = `IN (SELECT gmail_message_id FROM messages WHERE account = ?)`;
+    db.prepare(`DELETE FROM signals WHERE message_id ${inAccount}`).run(email);
+    db.prepare(`DELETE FROM attachments WHERE message_id ${inAccount}`).run(email);
+    db.prepare(`DELETE FROM messages WHERE account = ?`).run(email);
+    db.prepare(`DELETE FROM actions WHERE thread_id IN (SELECT gmail_thread_id FROM threads WHERE account = ?)`).run(email);
+    db.prepare(`DELETE FROM threads WHERE account = ?`).run(email);
+    db.prepare(`DELETE FROM gmail_accounts WHERE email = ?`).run(email);
+    return { messages: msgs.n };
+  })();
+}
+
+/** OAuth client for a stored account; refreshed tokens are encrypted and written back. */
 export function authedClient(db: DB, account: GmailAccountRow): OAuth2Client {
   const client = oauthClient();
   client.setCredentials({
-    refresh_token: account.refresh_token,
-    access_token: account.access_token ?? undefined,
+    refresh_token: decrypt(account.refresh_token),
+    access_token: account.access_token ? decrypt(account.access_token) : undefined,
     expiry_date: account.expiry_date ?? undefined,
   });
   client.on("tokens", (t) => {
     db.prepare(
       `UPDATE gmail_accounts
-         SET access_token = COALESCE(?, access_token),
-             expiry_date  = COALESCE(?, expiry_date),
+         SET access_token  = COALESCE(?, access_token),
+             expiry_date   = COALESCE(?, expiry_date),
              refresh_token = COALESCE(?, refresh_token)
        WHERE email = ?`,
-    ).run(t.access_token ?? null, t.expiry_date ?? null, t.refresh_token ?? null, account.email);
+    ).run(
+      t.access_token ? encrypt(t.access_token) : null,
+      t.expiry_date ?? null,
+      t.refresh_token ? encrypt(t.refresh_token) : null,
+      account.email,
+    );
   });
   return client;
 }

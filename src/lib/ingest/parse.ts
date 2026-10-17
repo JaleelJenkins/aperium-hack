@@ -10,7 +10,7 @@ export interface Address {
   email: string;
 }
 
-export type AttachmentKind = "pdf" | "image" | "other";
+export type AttachmentKind = "pdf" | "image" | "audio" | "video" | "other";
 
 export interface ParsedAttachment {
   partId: string;
@@ -200,11 +200,15 @@ function htmlToPlain(html: string): string {
 // ------------------------------------------------------------ attachments
 
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|heic|heif|bmp|tiff?)$/i;
+const AUDIO_EXT = /\.(m4a|mp3|wav|aac|ogg|opus|amr)$/i;
+const VIDEO_EXT = /\.(mp4|mov|webm|m4v|avi)$/i;
 
 export function attachmentKind(mimeType: string, filename: string): AttachmentKind {
   const mime = mimeType.toLowerCase();
   if (mime === "application/pdf" || /\.pdf$/i.test(filename)) return "pdf";
   if (mime.startsWith("image/") || IMAGE_EXT.test(filename)) return "image";
+  if (mime.startsWith("audio/") || AUDIO_EXT.test(filename)) return "audio";
+  if (mime.startsWith("video/") || VIDEO_EXT.test(filename)) return "video";
   return "other";
 }
 
