@@ -1,5 +1,5 @@
 {
-  "_readme": "Demo seed (PRD: Demo script and seed data). Three fictional clients, five projects. The seed inbox (seed/emails.ts, npm run seed:inbox) uses the contacts below. Clients are matched by sender domain; free-mail senders (gmail.com) by contact address. CHANGE_ME.live-demo is replaced by LIVE_DEMO_SENDER from .env.local (the teammate who sends the live email from their phone) when you run npm run seed.",
+  "_readme": "Demo seed (PRD: Demo script and seed data). Three fictional clients, five projects. The seed inbox (seed/emails.ts, npm run seed:inbox) uses the contacts below. Clients are matched by sender domain; free-mail senders (gmail.com) by contact address. CHANGE_ME.live-demo is replaced by LIVE_DEMO_SENDER from .env.local (the teammate who sends the live email from their phone) when you run npm run seed. Project summaries are what Resolve compares new threads against, so keep them specific: people, scope, and what kind of mail the project gets.",
   "clients": [
     {
       "id": "harbor-pine",
@@ -75,35 +75,35 @@
       "client_id": "harbor-pine",
       "routing_policy": "complexity_escalation",
       "name": "Lobby redesign",
-      "summary": "Redesign of the ground-floor lobby; client sends marked-up floor plans and site photos."
+      "summary": "Lobby redesign at 1200 Embarcadero Center for Harbor & Pine Architects (Dana Whitfield, principal; Marco Reyes, project architect). Northbeam Studio delivers concept design, a lighting plan and the signage package for the atrium lobby: reception desk, feature/donor wall, elevator core and wayfinding. Phase 1 is billed against a Harbor & Pine purchase order. Updates usually arrive as marked-up drawings and site photos."
     },
     {
       "id": "vector-route-dashboard",
       "client_id": "vector-freight",
       "routing_policy": "low_latency",
       "name": "Route dashboard",
-      "summary": "Ops dashboard for live routes; client reports bugs with screenshots."
+      "summary": "Live route operations dashboard for Vector Freight dispatch (Priya Nair, Head of Operations): map of Bay Area routes, live ETAs, depot dwell times and on-time delivery KPIs. Finance also uses it for reporting. Issues usually arrive as bug reports with screenshots of the web app."
     },
     {
       "id": "vector-driver-pilot",
       "client_id": "vector-freight",
       "routing_policy": "low_latency",
       "name": "Driver app pilot",
-      "summary": "Pilot of the driver mobile app with a subset of drivers; pilot date is client-driven."
+      "summary": "Pilot of the Vector Driver Android app with 12 drivers from the Oakland depot: stop lists, proof-of-delivery photos and signatures. The pilot start date is set by Vector leadership; Tom Becker (Fleet Manager) coordinates the drivers. Issues arrive as phone screenshots from drivers."
     },
     {
       "id": "lumen-website",
       "client_id": "lumen-clinic",
       "routing_policy": "strict_trust",
       "name": "Website refresh",
-      "summary": "Refresh of the clinic marketing site; a quote for added pages is outstanding."
+      "summary": "Refresh of the Lumen Clinic marketing website for Dr. Amara Okafor (founder): new visual direction, services pages and team page. Additional pages are scoped and quoted separately from the original refresh."
     },
     {
       "id": "lumen-booking",
       "client_id": "lumen-clinic",
       "routing_policy": "strict_trust",
       "name": "Booking integration",
-      "summary": "Online booking integration with the clinic's scheduling system."
+      "summary": "Online patient booking integration between the Lumen Clinic website and the CareSlot scheduling system, for Kelly Tran (practice manager): availability sync, appointment types and double-booking prevention for the front desk."
     }
   ],
   "model_profiles": [

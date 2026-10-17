@@ -66,7 +66,7 @@ export function readSeed(file = DEFAULT_SEED_PATH): SeedFile {
  * Upsert clients, contacts, projects and model profiles from seed config.
  * Safe to run repeatedly. Returns warnings (e.g. placeholder addresses).
  */
-export function applySeed(db: DB, seed: SeedFile): string[] {
+export function applySeed(db: DB, seed: SeedFile, opts: { overwriteSummaries?: boolean } = {}): string[] {
   const warnings: string[] = [];
   db.transaction(() => {
     const upClient = db.prepare(
@@ -101,6 +101,14 @@ export function applySeed(db: DB, seed: SeedFile): string[] {
          routing_policy = COALESCE(projects.routing_policy, excluded.routing_policy)`,
     );
     for (const p of seed.projects) upProject.run(p.id, p.client_id, p.name, p.summary, p.routing_policy);
+    // Summaries evolve as mail arrives, so the seed only sets them on first insert, an empty
+    // summary, or when asked (npm run seed -- --summaries).
+    const setSummary = db.prepare(
+      opts.overwriteSummaries
+        ? `UPDATE projects SET summary = ? WHERE id = ?`
+        : `UPDATE projects SET summary = ? WHERE id = ? AND (summary IS NULL OR summary = '')`,
+    );
+    for (const p of seed.projects) setSummary.run(p.summary, p.id);
     db.prepare(`INSERT OR IGNORE INTO app_settings (key, value) VALUES ('router.default_policy', ?)`).run(seed.default_routing_policy);
 
     const upProfile = db.prepare(

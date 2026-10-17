@@ -2,7 +2,6 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { gmail_v1 } from "googleapis";
 import { describe, expect, it } from "vitest";
 import { SEED_EMAILS } from "../seed/emails";
 import { openDb } from "../src/lib/db";
@@ -10,53 +9,10 @@ import { syncAccount } from "../src/lib/ingest/sync";
 import { applySeed, readSeed } from "../src/lib/seed";
 import { buildSeedMessages, encodeHeader, rfc2822Date, SEED_ASSETS_DIR } from "../src/lib/seed-inbox";
 import { labelsFile } from "../src/lib/seed-labels";
-import { b64url, FakeGmail } from "./helpers";
+import { FakeGmail, toGmailMessage } from "./helpers";
 
 const ANCHOR = new Date("2026-10-17T12:00:00-07:00");
 const INBOX = "pulse-test@gmail.com";
-
-/** Minimal MIME → Gmail "format=full" payload, enough for the messages we generate. */
-function toGmailMessage(raw: string, id: string, threadId: string, internalDate: number): gmail_v1.Schema$Message {
-  const [head, ...rest] = raw.split("\r\n\r\n");
-  const body = rest.join("\r\n\r\n");
-  const headers = head.split("\r\n").map((l) => {
-    const i = l.indexOf(":");
-    return { name: l.slice(0, i), value: l.slice(i + 1).trim() };
-  });
-  const ctype = headers.find((h) => h.name === "Content-Type")?.value ?? "text/plain";
-  const leaf = (partId: string, hdrs: { name: string; value: string }[], content: string): gmail_v1.Schema$MessagePart => {
-    const ct = hdrs.find((h) => h.name === "Content-Type")!.value;
-    const bytes = Buffer.from(content.replace(/\r\n/g, ""), "base64");
-    const filename = /filename="([^"]+)"/.exec(hdrs.find((h) => h.name === "Content-Disposition")?.value ?? "")?.[1] ?? "";
-    return {
-      partId,
-      mimeType: ct.split(";")[0],
-      filename,
-      headers: hdrs,
-      body: filename
-        ? { size: bytes.length, attachmentId: `att-${id}-${partId}` }
-        : { size: bytes.length, data: b64url(bytes) },
-    };
-  };
-
-  let payload: gmail_v1.Schema$MessagePart;
-  if (ctype.startsWith("multipart/")) {
-    const boundary = /boundary="([^"]+)"/.exec(ctype)![1];
-    const parts = body
-      .split(`--${boundary}`)
-      .slice(1, -1)
-      .map((p, i) => {
-        const [ph, ...pb] = p.replace(/^\r\n/, "").split("\r\n\r\n");
-        const phs = ph.split("\r\n").map((l) => ({ name: l.slice(0, l.indexOf(":")), value: l.slice(l.indexOf(":") + 1).trim() }));
-        return leaf(String(i), phs, pb.join("\r\n\r\n"));
-      });
-    payload = { partId: "", mimeType: ctype.split(";")[0], filename: "", headers, body: { size: 0 }, parts };
-  } else {
-    const ctHeaders = headers.filter((h) => h.name.startsWith("Content-"));
-    payload = { ...leaf("", ctHeaders, body), headers };
-  }
-  return { id, threadId, labelIds: ["INBOX", "UNREAD"], internalDate: String(internalDate), snippet: "", payload };
-}
 
 describe("seed inbox content", () => {
   const built = buildSeedMessages(ANCHOR, INBOX);

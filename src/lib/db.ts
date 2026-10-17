@@ -382,6 +382,12 @@ const MIGRATIONS: string[] = [
   CREATE INDEX route_decisions_message_idx ON route_decisions(message_id, at);
   CREATE INDEX route_decisions_run_idx ON route_decisions(run_id);
   `,
+
+  /* 004: Resolve (PRD F3): how and why a thread was filed to a project */ `
+  ALTER TABLE threads ADD COLUMN client_id         TEXT REFERENCES clients(id) ON DELETE SET NULL;
+  ALTER TABLE threads ADD COLUMN assigned_by       TEXT;  -- model id | rule | human
+  ALTER TABLE threads ADD COLUMN assignment_reason TEXT;  -- one line, shown on the card
+  `,
 ];
 
 export function openDb(file: string): DB {
