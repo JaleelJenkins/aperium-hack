@@ -54,7 +54,7 @@ export async function ingestMessage(
        VALUES (@id, @message_id, @part_id, @gmail_attachment_id, @filename, @mime_type, @size, @kind, @is_inline,
          @content_id, @sha256, @storage_path, @status, @error)`,
     );
-    for (const row of stored) ins.run(row);
+    for (const row of stored) ins.run({ ...row });
     audit(db, "worker", "message.ingested", `message:${parsed.id}`, {
       threadId: parsed.threadId,
       from: parsed.from?.email ?? null,
@@ -116,6 +116,7 @@ function insertMessage(db: DB, account: string, e: ParsedEmail): number {
 }
 
 interface AttachmentRow {
+  [key: string]: string | number | null;
   id: string;
   message_id: string;
   part_id: string;

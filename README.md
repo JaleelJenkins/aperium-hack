@@ -64,19 +64,56 @@ Each stage picks up `messages.status` from the previous one: `ingested → extra
 
 ## Setup
 
-Requires Node 20+.
+**1. Use Node 22 LTS** (22.13 or newer; 24 also works). Client Pulse uses Node's built-in SQLite, so nothing is compiled during install.
 
 ```bash
-git clone https://github.com/JaleelJenkins/aperium-hack && cd aperium-hack
-npm install
-cp .env.example .env.local
-openssl rand -base64 32          # paste into TOKEN_ENCRYPTION_KEY
-npm run seed                     # 3 clients, 5 projects, model profiles
-npm run dev                      # dashboard → http://localhost:3000
-npm run worker                   # second terminal: polls Gmail every 10s
+node -v
 ```
 
-Then click **Connect Gmail** and sign in as the test inbox. The worker pulls the last 7 days of inbox mail, then picks up new mail on every poll; the inbox view refreshes itself every 5s.
+If that's not v22 or v24, install it with [nvm](https://github.com/nvm-sh/nvm) — the repo has an `.nvmrc`:
+
+```bash
+nvm install 22
+nvm use 22
+```
+
+**2. Install and set up.** `npm run setup` creates `.env.local`, generates the token encryption key, and loads the seed clients and projects.
+
+```bash
+git clone https://github.com/JaleelJenkins/aperium-hack
+cd aperium-hack
+npm install
+npm run setup
+```
+
+**3. Fill in `.env.local`:** `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` (see [Google Cloud](#google-cloud-once-5-min) below), and `ANTHROPIC_API_KEY` for the AI stages.
+
+**4. Run the app and the worker in two terminals.** Both keep running; stop them with Ctrl+C.
+
+Terminal 1, the dashboard at http://localhost:3000:
+
+```bash
+npm run dev
+```
+
+Terminal 2, the ingest worker (polls Gmail every 10 seconds):
+
+```bash
+npm run worker
+```
+
+**5. Connect the inbox.** Open http://localhost:3000, click **Connect Gmail** and sign in as the test inbox. The worker pulls the last 7 days of inbox mail, then picks up new mail on every poll; the inbox view refreshes itself every 5 seconds.
+
+### Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `npm install` says Node is too old | Step 1: switch to Node 22 (`nvm use 22`), then `npm install` again |
+| `tsx: command not found` / `next: command not found` | `npm install` didn't finish. Fix the error it printed, rerun it, then `npm run setup` |
+| Dashboard shows "TOKEN_ENCRYPTION_KEY is not set" | Run `npm run setup`, then restart `npm run dev` |
+| Google says "access blocked" or "app not verified" | Add the inbox as a Test user on the OAuth consent screen |
+| Connected last week, now sync errors | Testing-mode tokens expire after ~7 days: click **Reconnect Gmail** |
+| `ExperimentalWarning: SQLite is an experimental feature` | Harmless; Node prints it for the built-in SQLite module |
 
 ### Environment (`.env.local`)
 
@@ -113,20 +150,22 @@ Then click **Connect Gmail** and sign in as the test inbox. The worker pulls the
 
 ## Scripts
 
-```bash
-npm run dev            # Next.js dashboard + API routes
-npm run worker         # ingest loop (seeds an empty DB on first start)
-npm run worker:once    # one ingest pass
-npm run seed           # upsert seed/seed.json (safe to re-run)
-npm run db:reset       # back to clean demo state; keeps Gmail connected (-- --all to disconnect)
-npm test               # 27 tests: cleaner, parser, sync, evidence, contracts, crypto, seed
-npm run typecheck
-npm run build
-```
+| Command | What it does |
+|---|---|
+| `npm run setup` | Create `.env.local`, generate the token key, load seed data (safe to re-run) |
+| `npm run dev` | Dashboard and API routes on http://localhost:3000 |
+| `npm run worker` | Ingest loop; seeds an empty database on first start |
+| `npm run worker:once` | One ingest pass, then exit |
+| `npm run seed` | Re-apply `seed/seed.json` after editing it |
+| `npm run db:reset` | Back to a clean demo state, keeping Gmail connected |
+| `npm run db:reset -- --all` | Same, and disconnect Gmail (wipes tokens) |
+| `npm test` | Cleaner, parser, sync, evidence, contracts, crypto, seed and DB tests |
+| `npm run typecheck` | TypeScript check |
+| `npm run build` | Production build |
 
 ## Data model
 
-SQLite (WAL, shared by the web app and the worker) at `data/client-pulse.db`, schema in `src/lib/db.ts`. Plain SQL types, so it ports to Supabase/Postgres.
+SQLite via Node's built-in `node:sqlite` (WAL, shared by the web app and the worker) at `data/client-pulse.db`, schema in `src/lib/db.ts`. Plain SQL types, so it ports to Supabase/Postgres.
 
 | Table | Key fields |
 |---|---|
