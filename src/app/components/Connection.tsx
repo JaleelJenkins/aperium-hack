@@ -29,7 +29,7 @@ export function InboxStatus() {
   const accounts = getAccounts();
   if (accounts.length === 0) return <span className="muted">No inbox connected</span>;
   const db = getDb();
-  const waiting = (db.prepare(`SELECT COUNT(*) AS n FROM messages WHERE status IN ('ingested', 'extracted', 'resolved', 'reasoned')`).get() as { n: number }).n;
+  const waiting = (db.prepare(`SELECT COUNT(*) AS n FROM messages WHERE status IN ('ingested', 'extracted', 'resolved', 'reasoning', 'reasoned', 'reviewing')`).get() as { n: number }).n;
   const busy = pipelineBusy(db);
   return (
     <span className="inbox-status">

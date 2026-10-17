@@ -815,3 +815,10 @@ pre.raw { white-space: pre-wrap; font-family: var(--mono); font-size: 12px; colo
   .side-nav { flex-wrap: wrap; }
   .side-nav a { white-space: nowrap; }
 }
+
+/* audit steps 3-4: human approval and the executor */
+.audit-step.human .ico { background: #fdf0ec; color: var(--accent-brand); }
+.audit-step.exec .ico { background: var(--status-draft-bg); color: var(--status-draft-text); }
+.audit-step.exec.failed .ico { background: var(--status-block-bg); color: var(--status-block-text); }
+.exec-links { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
+.exec-links .mono { font-size: 11px; }

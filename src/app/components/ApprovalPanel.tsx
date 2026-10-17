@@ -207,9 +207,9 @@ function Decided({ a, pending, run, toast }: { a: ApprovalInfo; pending: boolean
         <span className="verdict pass">{a.type === "draft_reply" ? "Draft in Gmail" : "Task added"}</span>
         <span>{when}</span>
         {a.type === "draft_reply" && (
-          <a className="btn sm" href="https://mail.google.com/mail/u/0/#drafts" target="_blank" rel="noreferrer">
+          <a className="btn sm" href={a.gmailDraftUrl ?? "https://mail.google.com/mail/u/0/#drafts"} target="_blank" rel="noreferrer">
             <Icon name="external" size={12} />
-            Open Gmail drafts
+            Open draft in Gmail
           </a>
         )}
       </>

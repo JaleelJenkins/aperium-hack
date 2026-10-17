@@ -439,6 +439,11 @@ const MIGRATIONS: string[] = [
   ALTER TABLE pipeline_runs ADD COLUMN reason_trace TEXT;   -- Reason model's notes for this email
   ALTER TABLE pipeline_runs ADD COLUMN review_trace TEXT;   -- Review model's notes on the items
   `,
+
+  /* 009: link the audit trail to the exact Gmail draft */ `
+  ALTER TABLE actions ADD COLUMN gmail_draft_message_id TEXT;  -- opens the draft in Gmail
+  ALTER TABLE actions ADD COLUMN executed_at TEXT;
+  `,
 ];
 
 export function openDb(file: string): DB {

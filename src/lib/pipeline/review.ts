@@ -373,6 +373,13 @@ export function storeReviewed(ctx: StoreCtx, kept: Candidates, verdicts: Map<str
         ? { ...a.payload, body: revised ?? a.payload.body }
         : { ...a.payload, title: revised ?? a.payload.title };
     const id = randomUUID();
+    if (a.type === "draft_reply") {
+      // One live draft per thread: a newer email's reply replaces an unapproved older one.
+      db.prepare(
+        `UPDATE actions SET status = 'superseded', decision_reason = 'Replaced by a draft for a newer email in this thread'
+          WHERE thread_id = ? AND type = 'draft_reply' AND status = 'proposed'`,
+      ).run(bundle.threadId);
+    }
     db.prepare(
       `INSERT INTO actions (id, project_id, thread_id, message_id, type, payload_json, status, evidence_json, produced_by_model,
                             review_verdict, reviewed_by_model, review_score, review_reason)
@@ -413,6 +420,18 @@ export interface ReasonReviewResult {
 }
 
 const MAX_ATTEMPTS = 3;
+
+/** Atomically moves a message from one status to another; false if it wasn't in `from`. */
+function claim(db: DB, id: string, from: string, to: string): boolean {
+  return Number(db.prepare(`UPDATE messages SET status = ? WHERE gmail_message_id = ? AND status = ?`).run(to, id, from).changes) > 0;
+}
+
+/** After a crash mid-run, put half-processed messages back so the next run picks them up. */
+export function recoverInterrupted(db: DB): number {
+  const a = db.prepare(`UPDATE messages SET status = 'resolved' WHERE status = 'reasoning'`).run();
+  const b = db.prepare(`UPDATE messages SET status = 'reasoned' WHERE status = 'reviewing'`).run();
+  return Number(a.changes) + Number(b.changes);
+}
 
 interface RunRow {
   id: string;
@@ -460,8 +479,13 @@ export async function runReason(db: DB, deps: ReasonReviewDeps, opts: { limit?: 
     .all(opts.limit ?? 20) as { id: string }[];
 
   for (const { id } of rows) {
+    // Claim it first: if another process got here, skip (no double model calls, no duplicate items).
+    if (!claim(db, id, "resolved", "reasoning")) continue;
     const bundle = buildBundle(db, id, opts.now ?? new Date());
-    if (!bundle) continue;
+    if (!bundle) {
+      claim(db, id, "reasoning", "resolved");
+      continue;
+    }
     let pair: ReturnType<typeof pickPair> | null = null;
     const runId = randomUUID();
     const t0 = Date.now();
@@ -497,7 +521,7 @@ export async function runReason(db: DB, deps: ReasonReviewDeps, opts: { limit?: 
          VALUES (?, ?, ?, ?, ?, 'failed', ?, ?)`,
       ).run(runId, id, pair?.reason ?? "unknown", pair?.review ?? "none", pair?.id ?? null, `reason: ${error}`, Date.now() - t0);
       const giveUp = failures(db, id) >= MAX_ATTEMPTS;
-      db.prepare(`UPDATE messages SET error = ?, status = CASE WHEN ? THEN 'failed' ELSE status END WHERE gmail_message_id = ?`).run(
+      db.prepare(`UPDATE messages SET error = ?, status = CASE WHEN ? THEN 'failed' ELSE 'resolved' END WHERE gmail_message_id = ?`).run(
         `reason: ${error}`,
         giveUp ? 1 : 0,
         id,
@@ -517,13 +541,18 @@ export async function runReview(db: DB, deps: ReasonReviewDeps, opts: { limit?: 
               r.cost_usd, r.provider
          FROM messages m JOIN pipeline_runs r ON r.message_id = m.gmail_message_id AND r.stage = 'reasoned'
         WHERE m.status = 'reasoned'
+          AND r.id = (SELECT id FROM pipeline_runs WHERE message_id = m.gmail_message_id AND stage = 'reasoned' ORDER BY at DESC LIMIT 1)
         ORDER BY m.received_at LIMIT ?`,
     )
     .all(opts.limit ?? 20) as unknown as RunRow[];
 
   for (const run of rows) {
+    if (!claim(db, run.message_id, "reasoned", "reviewing")) continue;
     const bundle = buildBundle(db, run.message_id, opts.now ?? new Date());
-    if (!bundle || !run.reason_json) continue;
+    if (!bundle || !run.reason_json) {
+      claim(db, run.message_id, "reviewing", "reasoned");
+      continue;
+    }
     const kept = (JSON.parse(run.reason_json) as { kept: Candidates }).kept;
     const reviewerModel = run.review_profile_id === "none" ? null : run.review_profile_id;
     const t0 = Date.now();
@@ -574,7 +603,7 @@ export async function runReview(db: DB, deps: ReasonReviewDeps, opts: { limit?: 
       db.prepare(`UPDATE pipeline_runs SET error = ?, review_ms = ? WHERE id = ?`).run(`review: ${error}`, Date.now() - t0, run.id);
       const giveUp = failures(db, run.message_id) >= MAX_ATTEMPTS;
       if (giveUp) db.prepare(`UPDATE pipeline_runs SET stage = 'failed' WHERE id = ?`).run(run.id);
-      db.prepare(`UPDATE messages SET error = ?, status = CASE WHEN ? THEN 'failed' ELSE status END WHERE gmail_message_id = ?`).run(
+      db.prepare(`UPDATE messages SET error = ?, status = CASE WHEN ? THEN 'failed' ELSE 'reasoned' END WHERE gmail_message_id = ?`).run(
         `review: ${error}`,
         giveUp ? 1 : 0,
         run.message_id,

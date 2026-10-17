@@ -76,6 +76,10 @@ export interface ApprovalInfo {
   decidedAt: string | null;
   decisionReason: string | null;
   gmailDraftId: string | null;
+  /** When the executor ran it, and where the draft lives in Gmail. */
+  executedAt: string | null;
+  account: string | null;
+  gmailDraftUrl: string | null;
   /** The model's version, when a person edited it. */
   original: { to?: string[]; subject?: string; body?: string; title?: string; notes?: string } | null;
   payload: { to?: string[]; subject?: string; body?: string; title?: string; notes?: string };
@@ -252,6 +256,7 @@ export function inspect(db: DB, ref: InspectRef): Inspection | null {
           review_verdict: string | null; review_score: number | null; review_reason: string | null;
           thread_id: string | null; error: string | null; decided_by: string | null; decided_at: string | null;
           decision_reason: string | null; gmail_draft_id: string | null; original_payload_json: string | null;
+          gmail_draft_message_id: string | null; executed_at: string | null;
         }
       | undefined;
     if (!a) return null;
@@ -355,11 +360,14 @@ function approvalInfo(
   a: {
     id: string; type: CardKind; status: string; project_id: string | null; error: string | null; decided_by: string | null;
     decided_at: string | null; decision_reason: string | null; gmail_draft_id: string | null; original_payload_json: string | null;
-    payload_json: string;
+    payload_json: string; thread_id: string | null; gmail_draft_message_id: string | null; executed_at: string | null;
   },
   payload: ApprovalInfo["payload"],
 ): ApprovalInfo {
   const type = a.type as ApprovalInfo["type"];
+  const account = a.thread_id
+    ? ((db.prepare(`SELECT account FROM threads WHERE gmail_thread_id = ?`).get(a.thread_id) as { account: string } | undefined)?.account ?? null)
+    : null;
   const project = a.project_id
     ? (db.prepare(`SELECT p.name, c.name AS client_name FROM projects p JOIN clients c ON c.id = p.client_id WHERE p.id = ?`).get(a.project_id) as
         | { name: string; client_name: string }
@@ -386,10 +394,19 @@ function approvalInfo(
     decidedAt: a.decided_at,
     decisionReason: a.decision_reason,
     gmailDraftId: a.gmail_draft_id,
+    executedAt: a.executed_at,
+    account,
+    gmailDraftUrl: a.gmail_draft_id ? gmailDraftUrl(account, a.gmail_draft_message_id) : null,
     original: a.original_payload_json ? parseJson(a.original_payload_json, null) : null,
     payload,
     newProject,
     projectName: project?.name ?? null,
     clientName: project?.client_name ?? null,
   };
+}
+
+/** Opens the draft in Gmail, signed in as the inbox that owns the thread. */
+export function gmailDraftUrl(account: string | null, messageId: string | null): string {
+  const base = `https://mail.google.com/mail/u/${account ? encodeURIComponent(account) : "0"}/`;
+  return messageId ? `${base}#drafts?compose=${encodeURIComponent(messageId)}` : `${base}#drafts`;
 }

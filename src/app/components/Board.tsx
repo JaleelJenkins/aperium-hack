@@ -52,7 +52,10 @@ function emailStage(status: string, triage: boolean): string {
       return "Matching project";
     case "resolved":
       return triage ? "Waiting for a person" : "Extracting signals";
+    case "reasoning":
+      return "Extracting signals";
     case "reasoned":
+    case "reviewing":
       return "In model review";
     default:
       return status;

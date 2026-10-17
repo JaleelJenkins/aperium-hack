@@ -326,7 +326,7 @@ export function getBoard(db: DB, opts: { filter?: BoardFilter; now?: number } = 
     .prepare(
       `SELECT id, project_id, message_id, type, payload_json, status, evidence_json, produced_by_model,
               reviewed_by_model, review_verdict, review_score, created_at, decided_at, error
-         FROM actions`,
+         FROM actions WHERE status != 'superseded'`,
     )
     .all() as ActionRow[];
 

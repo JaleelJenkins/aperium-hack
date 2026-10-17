@@ -83,7 +83,7 @@ export class FakeGmail implements GmailApi {
     if (this.failDrafts) throw new Error("insufficient permission: gmail.compose");
     const id = `draft-${this.drafts.length + 1}`;
     this.drafts.push({ id, raw, threadId });
-    return { id };
+    return { id, messageId: `msg-${id}` };
   }
 
   deliver(msg: gmail_v1.Schema$Message): void {
