@@ -43,6 +43,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <Icon name="board" size={15} />
                 Board
               </NavLink>
+              <NavLink href="/projects">
+                <Icon name="folder" size={15} />
+                Projects
+              </NavLink>
             </nav>
             {clients.length > 0 && (
               <nav className="side-nav clients">

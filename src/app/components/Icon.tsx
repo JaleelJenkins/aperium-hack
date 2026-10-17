@@ -17,6 +17,8 @@ const PATHS = {
   external: "M14 4h6v6M20 4l-9 9M18 14v6H4V6h6",
   eye: "M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z",
   gauge: "M12 14l4-4M4 18a9 9 0 1 1 16 0",
+  folder: "M3 6h6l2 2h10v11H3z",
+  pencil: "M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4",
 } as const;
 
 export type IconName = keyof typeof PATHS;
