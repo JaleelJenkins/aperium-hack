@@ -6,6 +6,7 @@
  */
 import { revalidatePath } from "next/cache";
 import { getDb } from "@/lib/db";
+import { updateProjectSummary } from "@/lib/projects";
 import {
   dryRunOne,
   finishDryRun,
@@ -70,4 +71,13 @@ export async function finishDryRunAction(runId: string): Promise<RouteRunSummary
   const summary = finishDryRun(getDb(), runId);
   revalidatePath("/", "layout");
   return summary;
+}
+
+export async function updateProjectSummaryAction(projectId: string, summary: string): Promise<ActionResult> {
+  try {
+    updateProjectSummary(getDb(), projectId, summary);
+    return done("Summary saved. New email is matched against it from now on.");
+  } catch (err) {
+    return fail(err);
+  }
 }
