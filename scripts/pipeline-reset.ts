@@ -2,6 +2,7 @@
  * Back to the 15 seed emails, processed once.
  *   npm run pipeline:reset             # shows what would change
  *   npm run pipeline:reset -- --yes    # does it; then click Sync now (or run npm run pipeline)
+ *   npm run pipeline:reset -- --yes --force   # also when a stopped run left its lock behind
  * Keeps clients, projects, summaries, review rules and the Gmail connection. Removed
  * mail stays in Gmail. Stop the worker first so it doesn't process mid-reset.
  */
@@ -13,6 +14,8 @@ import { getDb } from "../src/lib/db";
 import { applyReprocess, planReprocess } from "../src/lib/reprocess";
 
 const yes = process.argv.includes("--yes");
+// A run killed mid-way (Ctrl+C on npm run dev) leaves its lease for up to 15 min; --force clears it.
+const force = process.argv.includes("--force");
 const db = getDb();
 const plan = planReprocess(db);
 const o = plan.outputs;
@@ -27,8 +30,11 @@ if (!yes) {
   console.log("\nNothing changed yet. Run again with -- --yes to apply.");
   process.exit(0);
 }
-if (pipelineBusy(db)) {
-  console.log("\nThe pipeline is running right now (worker or Sync now). Stop the worker, wait a minute, then try again.");
+if (pipelineBusy(db) && !force) {
+  console.log(
+    "\nThe pipeline looks busy (worker or Sync now). Stop npm run dev and the worker with Ctrl+C, then run:\n" +
+      "  npm run pipeline:reset -- --yes --force",
+  );
   process.exit(1);
 }
 applyReprocess(db, plan);
