@@ -37,16 +37,75 @@ export interface PipelineResult {
   insights: InsightsResult;
 }
 
+/** How many emails go through the pipeline at once (each is a few model calls). */
+export const PIPELINE_CONCURRENCY = Math.max(1, Number(process.env.PIPELINE_CONCURRENCY) || 4);
+
+const emptyResult = (deps: PipelineDeps): Omit<PipelineResult, "insights"> & { insights?: InsightsResult } => ({
+  extract: deps.extractor ? { messages: 0, attachments: 0, failed: [] } : null,
+  resolve: { assigned: [], inherited: 0, cards: [], failed: [] },
+  reasonReview: deps.reasonReview ? { reasoned: 0, reviewed: 0, failed: [], perMessage: [] } : null,
+});
+
+/**
+ * Streams waiting mail through every stage one email at a time, several emails in
+ * parallel: each email goes Extract -> Resolve -> Reason -> Review before the worker
+ * slot moves on, so cards leave Triage within seconds instead of after the whole
+ * inbox has been read. Emails in the same thread run in order (a reply inherits the
+ * project its thread was filed to); different threads run concurrently.
+ */
 export async function runPipeline(
   db: DB,
   deps: PipelineDeps = defaultDeps(),
-  opts: { dataDir?: string; now?: Date } = {},
+  opts: { dataDir?: string; now?: Date; concurrency?: number; limit?: number } = {},
 ): Promise<PipelineResult> {
-  const extract = deps.extractor ? await runExtract(db, deps.extractor, opts) : null;
-  const resolve = await runResolve(db, deps.matcher);
-  const reasonReview = deps.reasonReview ? await runReasonReview(db, deps.reasonReview, { now: opts.now }) : null;
+  const out = emptyResult(deps);
+  const rows = db
+    .prepare(
+      `SELECT gmail_message_id AS id, thread_id FROM messages
+        WHERE status IN ('ingested', 'extracted', 'resolved', 'reasoned') ORDER BY received_at LIMIT ?`,
+    )
+    .all(opts.limit ?? 200) as { id: string; thread_id: string }[];
+  const threads = new Map<string, string[]>();
+  for (const r of rows) threads.set(r.thread_id, [...(threads.get(r.thread_id) ?? []), r.id]);
+
+  const one = async (id: string) => {
+    if (deps.extractor && out.extract) {
+      const e = await runExtract(db, deps.extractor, { dataDir: opts.dataDir, onlyId: id });
+      out.extract.messages += e.messages;
+      out.extract.attachments += e.attachments;
+      out.extract.failed.push(...e.failed);
+    }
+    const r = await runResolve(db, deps.matcher, { onlyId: id });
+    out.resolve.assigned.push(...r.assigned);
+    out.resolve.inherited += r.inherited;
+    out.resolve.cards.push(...r.cards);
+    out.resolve.failed.push(...r.failed);
+    if (deps.reasonReview && out.reasonReview) {
+      const rr = await runReasonReview(db, deps.reasonReview, { now: opts.now, onlyId: id });
+      out.reasonReview.reasoned += rr.reasoned;
+      out.reasonReview.reviewed += rr.reviewed;
+      out.reasonReview.failed.push(...rr.failed);
+      out.reasonReview.perMessage.push(...rr.perMessage);
+    }
+  };
+
+  const queue = [...threads.values()];
+  const workers = Array.from({ length: Math.min(opts.concurrency ?? PIPELINE_CONCURRENCY, queue.length) }, async () => {
+    for (let ids = queue.shift(); ids; ids = queue.shift()) {
+      for (const id of ids) {
+        try {
+          await one(id);
+        } catch (err) {
+          // Stages record their own failures; this only guards against an unexpected throw.
+          out.resolve.failed.push({ message: id, error: err instanceof Error ? err.message : String(err) });
+        }
+      }
+    }
+  });
+  await Promise.all(workers);
+  // Deterministic insight rules and project health over everything stored (no model call).
   const insights = runInsights(db, { now: opts.now });
-  return { extract, resolve, reasonReview, insights };
+  return { ...out, insights };
 }
 
 export function describe(r: PipelineResult): string[] {

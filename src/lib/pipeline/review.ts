@@ -469,14 +469,15 @@ function mergeProvider(a: string | null, b: string | null): string | null {
 }
 
 /** Reason over filed messages (status 'resolved'), verify, and park the result for Review. */
-export async function runReason(db: DB, deps: ReasonReviewDeps, opts: { limit?: number; now?: Date } = {}): Promise<{ reasoned: number; failed: ReasonReviewResult["failed"] }> {
+export async function runReason(db: DB, deps: ReasonReviewDeps, opts: { limit?: number; now?: Date; onlyId?: string } = {}): Promise<{ reasoned: number; failed: ReasonReviewResult["failed"] }> {
   const out = { reasoned: 0, failed: [] as ReasonReviewResult["failed"] };
   const rows = db
     .prepare(
       `SELECT m.gmail_message_id AS id FROM messages m JOIN threads t ON t.gmail_thread_id = m.thread_id
-        WHERE m.status = 'resolved' AND t.project_id IS NOT NULL ORDER BY m.received_at LIMIT ?`,
+        WHERE m.status = 'resolved' AND t.project_id IS NOT NULL AND (? IS NULL OR m.gmail_message_id = ?)
+        ORDER BY m.received_at LIMIT ?`,
     )
-    .all(opts.limit ?? 20) as { id: string }[];
+    .all(opts.onlyId ?? null, opts.onlyId ?? null, opts.limit ?? 20) as { id: string }[];
 
   for (const { id } of rows) {
     // Claim it first: if another process got here, skip (no double model calls, no duplicate items).
@@ -533,7 +534,7 @@ export async function runReason(db: DB, deps: ReasonReviewDeps, opts: { limit?: 
 }
 
 /** Review everything Reason parked (status 'reasoned'), store, and mark 'reviewed'. */
-export async function runReview(db: DB, deps: ReasonReviewDeps, opts: { limit?: number; now?: Date } = {}): Promise<{ reviewed: number; failed: ReasonReviewResult["failed"]; perMessage: ReasonReviewResult["perMessage"] }> {
+export async function runReview(db: DB, deps: ReasonReviewDeps, opts: { limit?: number; now?: Date; onlyId?: string } = {}): Promise<{ reviewed: number; failed: ReasonReviewResult["failed"]; perMessage: ReasonReviewResult["perMessage"] }> {
   const out = { reviewed: 0, failed: [] as ReasonReviewResult["failed"], perMessage: [] as ReasonReviewResult["perMessage"] };
   const rows = db
     .prepare(
@@ -542,9 +543,10 @@ export async function runReview(db: DB, deps: ReasonReviewDeps, opts: { limit?: 
          FROM messages m JOIN pipeline_runs r ON r.message_id = m.gmail_message_id AND r.stage = 'reasoned'
         WHERE m.status = 'reasoned'
           AND r.id = (SELECT id FROM pipeline_runs WHERE message_id = m.gmail_message_id AND stage = 'reasoned' ORDER BY at DESC LIMIT 1)
+          AND (? IS NULL OR m.gmail_message_id = ?)
         ORDER BY m.received_at LIMIT ?`,
     )
-    .all(opts.limit ?? 20) as unknown as RunRow[];
+    .all(opts.onlyId ?? null, opts.onlyId ?? null, opts.limit ?? 20) as unknown as RunRow[];
 
   for (const run of rows) {
     if (!claim(db, run.message_id, "reasoned", "reviewing")) continue;
@@ -615,7 +617,7 @@ export async function runReview(db: DB, deps: ReasonReviewDeps, opts: { limit?: 
 }
 
 /** Both stages back to back: what the worker runs after every poll. */
-export async function runReasonReview(db: DB, deps: ReasonReviewDeps, opts: { limit?: number; now?: Date } = {}): Promise<ReasonReviewResult> {
+export async function runReasonReview(db: DB, deps: ReasonReviewDeps, opts: { limit?: number; now?: Date; onlyId?: string } = {}): Promise<ReasonReviewResult> {
   const a = await runReason(db, deps, opts);
   const b = await runReview(db, deps, opts);
   return { reasoned: a.reasoned, reviewed: b.reviewed, failed: [...a.failed, ...b.failed], perMessage: b.perMessage };
