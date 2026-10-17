@@ -50,7 +50,8 @@ Each stage picks up `messages.status` from the previous one: `ingested → extra
 | | Reply inherits thread's project | P0 | ✅ | `src/lib/pipeline/resolve.ts` |
 | | New thread matched against project summaries with confidence; below 0.7 → "New project?" card | P0 | ✅ | `src/lib/pipeline/resolve.ts` |
 | **F4 State & insights** | Incremental project state update | P0 | ⬜ | `projects`, `signals` |
-| | Insight rules: unanswered ask, deadline w/o commitment, overdue commitment | P0 | ⬜ | `insights` |
+| | Insight rules: unanswered ask (`ASK_SLA_HOURS`, default 24), deadline within 48 h with no commitment, our commitment overdue. Run after every pipeline pass; keyed per signal, auto-resolve, dismissals stick, all audited | P0 | ✅ | `src/lib/pipeline/insights.ts` |
+| | Project health from open insights (high → blocked, medium → at risk); insight cards lead Waiting on us, dismiss from the drawer | P0 | ✅ | `src/lib/pipeline/insights.ts`, `src/lib/board.ts`, `src/app/components/InsightPanel.tsx` |
 | **F5 Action queue** | Draft reply + internal task; proposed → approved/edited/rejected → executed/failed; reject needs a reason. Approve / Edit / Reject in the evidence drawer | P0 | ✅ | `src/lib/approvals.ts`, `src/app/components/ApprovalPanel.tsx` |
 | | "New project?" cards: file to a project, create one, or dismiss | P0 | ✅ | `src/lib/approvals.ts` |
 | | Executor calls `drafts.create` in thread only, never `messages.send`; approved tasks become "We owe" items | P0 | ✅ | `src/lib/pipeline/execute.ts` |
@@ -58,7 +59,7 @@ Each stage picks up `messages.status` from the previous one: `ingested → extra
 | | Every decision audited | P0 | ✅ table + helper | `audit_events`, `audit()` |
 | **F6 Views** | Portfolio board: client/project swimlanes × workflow columns (Triage · Waiting on us · Waiting on client · Needs approval · Done), sorted by risk | P0 | ✅ | `src/app/page.tsx`, `src/lib/board.ts` |
 | | Evidence drawer · Caught by review | P0 | ✅ | `src/app/components/Drawer.tsx`, `src/lib/inspect.ts` |
-| | Model scoreboard: policy switcher, payload simulator, pair leaderboard, trap matrix, routing dry-run | P0 | ✅ (benchmarks illustrative until eval runner) | `src/app/scoreboard/`, `src/lib/router/` |
+| | Model scoreboard: policy switcher, payload simulator, pair leaderboard, trap matrix, routing dry-run | P0 | ✅ (measured once `npm run eval` has run) | `src/app/scoreboard/`, `src/lib/router/` |
 | | Project page · Action inbox | P0 | ⬜ | `src/app/` |
 | | Message source view with line anchors (evidence target) | P0 | ✅ | `src/app/messages/[id]` |
 | | Activity & audit feed | P1 | ⬜ | |
@@ -70,7 +71,7 @@ Each stage picks up `messages.status` from the previous one: `ingested → extra
 | | Model profiles + per-stage user choice | P0 | ✅ router picks the pair per email, ⬜ `user_model_prefs` not read | `model_profiles`, `user_model_prefs` |
 | | Reason × Review pair router: per-project policy (seeded per client), escalation on payload risk, promote/pin, route trace on cards | P0 | ✅ | `src/lib/router/pairRouter.ts`, `store.ts` |
 | | Labeled seed set | P0 | ✅ | `seed/emails.ts`, `npm run seed:inbox` |
-| | Eval runner | P0 | ⬜ labels ready. Runner writes `eval_runs.metrics_json` per `EvalRunMetrics` (`src/lib/router/store.ts`); the scoreboard swaps the illustrative row for the measured one | `seed/labels.json`, `data/seed-run.json`, `eval_runs` |
+| | Eval runner: `npm run eval` replays the 15 labeled emails per pair (in memory, no Gmail), scores raw vs verified accuracy, signal recall, traps, p50 latency, cost; writes `eval_runs` and the scoreboard shows measured rows | P0 | ✅ | `scripts/eval.ts`, `src/lib/eval.ts` |
 
 ## Setup
 
@@ -137,6 +138,7 @@ npm run worker
 | `LLM_PROVIDER` | model layer | `auto` (default: Anthropic for Claude when its key is set, else OpenRouter), `anthropic`, or `openrouter` (everything through OpenRouter) |
 | `OPENROUTER_MODEL_GEMINI_FLASH` | router pair `flash-haiku` | an OpenRouter model id; until set, that pair is unavailable to the router |
 | `EXTRACT_MODEL`, `RESOLVE_MODEL` | Extract, Resolve | defaults `claude-sonnet-5-5`, `claude-haiku-5-5` |
+| `ASK_SLA_HOURS` | insight rules | hours before an unanswered client ask is flagged, default `24` |
 | `LIVE_DEMO_SENDER` | live demo | the teammate's phone address; `npm run seed` maps it to Harbor & Pine in place of `CHANGE_ME.live-demo` |
 | `DATA_DIR` | storage | SQLite DB + attachments, default `./data` (gitignored) |
 | `POLL_INTERVAL_MS` | worker | default `10000` |
@@ -260,7 +262,7 @@ The worker runs both after Resolve, on every poll; `npm run pipeline` runs them 
 
 **Storage:** passed and revised items go to `signals`, `insights` and `actions` with the producer and reviewer models, score and reason. Every verdict goes to `model_reviews`; blocks (by `review`, `verify` or `policy`) feed **Caught by review** with links to the contradicting page. `pipeline_runs` records the pair, tokens, cost (OpenRouter's reported cost, else list prices) and latency from Gmail receipt to stored. Reason's verified output is kept until Review succeeds, so a failed Review retries without paying for Reason again; after 3 failures the message is marked `failed`.
 
-**Model layer** (`src/lib/pipeline/llm.ts`, `models.ts`, `openrouter.ts`). Stages call one `Llm` interface with a forced tool, and name models by router profile (`claude-haiku`, `claude-sonnet`, `claude-opus`, `gemini-flash`) or Claude API id. Each call goes to Anthropic or to OpenRouter's OpenAI-compatible API (PDFs as file parts, images as data URLs) depending on which keys are set and `LLM_PROVIDER`. With OpenRouter, a second vendor (e.g. a Gemini Flash reasoner) is one env var away.
+**Model layer** (`src/lib/pipeline/llm.ts`, `models.ts`, `openrouter.ts`). Stages call one `Llm` interface with a single tool (`tool_choice: auto` plus an instruction to call it, since some models reject a forced tool), and name models by router profile (`claude-haiku`, `claude-sonnet`, `claude-opus`, `gemini-flash`) or Claude API id. Each call goes to Anthropic or to OpenRouter's OpenAI-compatible API (PDFs as file parts, images as data URLs) depending on which keys are set and `LLM_PROVIDER`. With OpenRouter, a second vendor (e.g. a Gemini Flash reasoner) is one env var away.
 
 To add an OpenRouter key:
 
@@ -281,6 +283,18 @@ Then run the pipeline once to process what's waiting:
 ```bash
 npm run pipeline
 ```
+
+## Insights and health
+
+After every pipeline pass (worker, Sync now, `npm run pipeline`), `src/lib/pipeline/insights.ts` runs three deterministic checks over the open signals. No model call, so it works without an API key and gives the same answer every time.
+
+| Rule | Flags | Severity |
+|---|---|---|
+| Unanswered ask | A client ask older than `ASK_SLA_HOURS` (24) with no message from us later in the thread | medium; high once the ask is past due |
+| Deadline with no commitment | A deadline (or an ask with a due date) inside the next 48 h, with no commitment from us on the project since it arrived | medium; high inside 24 h |
+| Our commitment overdue | Something we committed to, past its due date | high |
+
+**Project health** comes from every open insight, rule-made or model-made: any high makes the project **Blocked**, any medium **At risk**, otherwise **On track**. Open insights lead the **Waiting on us** column with a severity chip; the drawer explains the rule, links to the item it was raised on, and has **Dismiss** (reason optional, audited). Each rule insight is keyed to its signal, so a rerun updates it instead of adding a copy, it resolves itself when the condition clears (we replied, a commitment was made, the item was closed), and a dismissal sticks. An approved internal task becomes a commitment from us, which clears a "deadline with no commitment" right away.
 
 ## Approvals and review rules
 
@@ -307,6 +321,20 @@ After approval, the drawer's **Model review audit** shows the whole chain: Reaso
 
 Rules are scoped to every project, one client's projects, or one project, and can target everything, signals, insights, actions, drafts or tasks. Each one counts its catches; blocks show **Rule R1** in Caught by review, linked to the rule. Turn a rule off to keep it without applying it.
 
+## Eval
+
+`npm run eval` measures each model pair on the labeled seed inbox so the scoreboard shows real numbers. It needs a model key and the 15 seed emails already ingested (`npm run seed:inbox`, then let the worker sync).
+
+- **Isolated.** The seed mail is copied into an in-memory database: no Gmail calls, nothing on the live board changes. Attachments the live pipeline couldn't read are extracted there, and threads are filed once; then each pair gets a fresh copy and runs Reason and Review one email at a time, oldest first, as of the seeding time.
+- **Scored without an LLM judge**, against `seed/emails.ts`:
+  - *Raw accuracy*: Reason named the labeled project and made no trap claim. *Verified accuracy*: the email is filed to the labeled project and nothing shown for it carries a trap claim. The gap is what review rescues.
+  - *Signal recall*: labeled asks and deadlines found among the shown signals (content-word match; deadlines also need the right date, ±1 day).
+  - *Traps*: per planted trap, **Avoided** (never claimed), **Blocked** or **Revised** (claimed, then stopped by review, verify or policy, with the reason) or **Leaked** (shown).
+  - *Latency* (median model time per email) and *cost per email*.
+- **Output.** One `eval_runs` row per pair. Its leaderboard row switches from illustrative to measured, which also drives routing. `db:reset` keeps eval runs.
+
+All available pairs cost a few dollars and take a few minutes. Run it, check the scoreboard, then `npm run demo:snapshot`.
+
 ## Scripts
 
 | Command | What it does |
@@ -315,7 +343,8 @@ Rules are scoped to every project, one client's projects, or one project, and ca
 | `npm run dev` | Dashboard and API routes on http://localhost:3000 |
 | `npm run worker` | Ingest loop; seeds an empty database on first start |
 | `npm run worker:once` | One ingest pass (plus the pipeline), then exit |
-| `npm run pipeline` | Run Extract, Resolve, Reason and Review over everything waiting, without polling Gmail |
+| `npm run pipeline` | Run Extract, Resolve, Reason, Review and the insight rules over everything waiting, without polling Gmail |
+| `npm run eval` | Score each Reason → Review pair on the 15 labeled seed emails and write `eval_runs` for the scoreboard (`-- --pair haiku-sonnet` for one pair, `-- --dry` to print only). Before the demo, never live |
 | `npm run seed` | Re-apply `seed/seed.json` after editing it |
 | `npm run seed -- --summaries` | Also overwrite project summaries with the seed versions |
 | `npm run seed:inbox` | Put the 15 demo emails into the connected inbox (`-- --dry-run` to preview) |
