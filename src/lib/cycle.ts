@@ -14,6 +14,7 @@ import { draftApiFor, listAccounts } from "./gmail/client";
 import { syncAll } from "./ingest/sync";
 import { runExecutor, type ExecuteResult } from "./pipeline/execute";
 import { recoverInterrupted } from "./pipeline/review";
+import { finishBatch, logEmail, startBatch } from "./run-log";
 import { defaultDeps, runPipeline, type PipelineDeps, type PipelineResult } from "./pipeline/run";
 import { applySeed, readSeed } from "./seed";
 
@@ -65,15 +66,26 @@ export async function processWaiting(db: DB, owner: string, deps: PipelineDeps =
   try {
     // Holding the lease means nobody else is mid-run: anything left "reasoning"/"reviewing" was interrupted.
     recoverInterrupted(db);
-    // Loop until nothing moves: each stage takes a batch, and a big inbox needs several.
-    let pipeline = await runPipeline(db, deps);
-    for (let i = 0; i < 10 && moved(pipeline); i++) {
-      const next = await runPipeline(db, deps);
-      if (!moved(next)) break;
-      pipeline = merge(pipeline, next);
+    // Live run log for the board, only when there's something to process.
+    const started = Date.now();
+    const waiting = (db.prepare(`SELECT COUNT(*) AS n FROM messages WHERE status IN ('ingested', 'extracted', 'resolved', 'reasoned')`).get() as { n: number }).n;
+    const batch = waiting ? startBatch(db, owner) : null;
+    const onEmail = batch ? (o: Parameters<typeof logEmail>[2]) => logEmail(db, batch, o) : undefined;
+    try {
+      // Loop until nothing moves: each stage takes a batch, and a big inbox needs several.
+      let pipeline = await runPipeline(db, deps, { onEmail });
+      for (let i = 0; i < 10 && moved(pipeline); i++) {
+        const next = await runPipeline(db, deps, { onEmail });
+        if (!moved(next)) break;
+        pipeline = merge(pipeline, next);
+      }
+      const executor = await runExecutor(db, draftApiFor(db));
+      if (batch) finishBatch(db, batch, started);
+      return { ran: true, pipeline, executor };
+    } catch (err) {
+      if (batch) finishBatch(db, batch, started, err instanceof Error ? err.message : String(err));
+      throw err;
     }
-    const executor = await runExecutor(db, draftApiFor(db));
-    return { ran: true, pipeline, executor };
   } finally {
     releasePipelineLock(db, token);
   }

@@ -301,6 +301,10 @@ After every pipeline pass (worker, Sync now, `npm run pipeline`), `src/lib/pipel
 
 **Project health** comes from every open insight, rule-made or model-made: any high makes the project **Blocked**, any medium **At risk**, otherwise **On track**. Open insights lead the **Waiting on us** column with a severity chip; the drawer explains the rule, links to the item it was raised on, and has **Dismiss** (reason optional, audited). Each rule insight is keyed to its signal, so a rerun updates it instead of adding a copy, it resolves itself when the condition clears (we replied, a commitment was made, the item was closed), and a dismissal sticks. An approved internal task becomes a commitment from us, which clears a "deadline with no commitment" right away.
 
+## Sync now: the whole run, live on the board
+
+**Sync now** pulls new mail and runs the full pipeline (Extract → Resolve → Reason → Review → Executor) in the background, the same run as `npm run pipeline`. A **run panel** appears under the page header: a progress bar (`7/15 emails · 42s`), one line per email the moment it finishes (where it was filed, what Review let through, what was caught, Reason and Review seconds), then totals with links to the approval queue and Caught by review, total time and cost. Worker runs show there too. Click a line to open that email.
+
 ## Approvals and review rules
 
 **Approving.** Click any card in **Needs approval** (or **Needs approval** in the sidebar, which opens the oldest waiting item). The drawer shows the draft, its evidence and the model review, with three buttons:

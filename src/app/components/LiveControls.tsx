@@ -33,6 +33,8 @@ export function SyncNowButton() {
       if (body.pipeline === "started") parts.push(`processing ${body.waiting} email${body.waiting === 1 ? "" : "s"}…`);
       else if (body.pipeline === "busy") parts.push("pipeline already running");
       setMsg(parts.join(" · "));
+      // Tell the run panel to start watching right away.
+      window.dispatchEvent(new Event("pipeline:started"));
       router.refresh();
     } catch (err) {
       setMsg(err instanceof Error ? err.message : String(err));

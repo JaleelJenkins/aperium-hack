@@ -54,6 +54,7 @@ export function applyReprocess(db: DB, plan: ReprocessPlan, opts: { dataDir?: st
   db.transaction(() => {
     for (const t of ["signals", "insights", "actions", "model_reviews", "pipeline_runs"]) db.exec(`DELETE FROM ${t}`);
     db.exec(`DELETE FROM route_decisions WHERE source = 'pipeline'`);
+    db.exec(`DELETE FROM pipeline_batches`); // the board's run panel starts fresh too
     db.exec(`DELETE FROM app_settings WHERE key = 'pipeline.lock'`);
     // Filed threads with their attachments read go straight back to Reason; anything else restarts at Extract.
     db.exec(`

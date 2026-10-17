@@ -8,6 +8,7 @@ import { ConnectionBanners, ConnectionControls, InboxStatus } from "./components
 import { CaughtDrawer, InspectorDrawer } from "./components/Drawer";
 import { Icon } from "./components/Icon";
 import { AutoRefresh } from "./components/LiveControls";
+import { PipelinePanel } from "./components/PipelinePanel";
 import { TuneDrawer } from "./components/TuneDrawer";
 
 export const dynamic = "force-dynamic";
@@ -64,6 +65,9 @@ export default async function BoardPage({
         <div className="spacer" />
         <ConnectionControls />
       </div>
+
+      {/* Live run log: what `npm run pipeline` prints, per email, as Sync now / the worker runs. */}
+      <PipelinePanel />
 
       <div className="stats">
         <Stat label="Open items" value={t.open} />
