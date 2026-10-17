@@ -4,6 +4,7 @@
  * and recording decisions for the dry-run / pipeline.
  */
 import { randomUUID } from "node:crypto";
+import { cache } from "react";
 import { audit, type DB } from "../db";
 import { finalizePairs, SEED_PAIR_ROWS, type SeedRow } from "./leaderboard";
 import { inspectEmailPayloadForRouting, selectOptimalModelPair } from "./pairRouter";
@@ -21,7 +22,7 @@ export interface RouterSettings {
 
 const DEFAULT_PINNED = "haiku-sonnet";
 
-export function getRouterSettings(db: DB): RouterSettings {
+export const getRouterSettings = cache((db: DB): RouterSettings => {
   const rows = db.prepare(`SELECT key, value FROM app_settings WHERE key LIKE 'router.%'`).all() as { key: string; value: string }[];
   const kv = new Map(rows.map((r) => [r.key, r.value]));
   const policy = kv.get("router.default_policy");
@@ -29,7 +30,7 @@ export function getRouterSettings(db: DB): RouterSettings {
     defaultPolicy: isPolicy(policy) ? policy : "pareto_auto",
     pinnedPairId: kv.get("router.pinned_pair_id") ?? DEFAULT_PINNED,
   };
-}
+});
 
 function setSetting(db: DB, key: string, value: string) {
   db.prepare(`INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(key, value);
@@ -150,14 +151,30 @@ function measuredRows(db: DB): Map<string, SeedRow & { source: "measured"; measu
 }
 
 /** Illustrative seed rows, with any fully measured pair replacing its seed row. */
-export function getLeaderboard(db: DB): ModelPairBenchmark[] {
+export const getLeaderboard = cache((db: DB): ModelPairBenchmark[] => {
   const measured = measuredRows(db);
   const rows = SEED_PAIR_ROWS.map((r) => measured.get(r.id) ?? r);
   for (const [id, r] of measured) if (!SEED_PAIR_ROWS.some((s) => s.id === id)) rows.push(r);
   return finalizePairs(rows);
-}
+});
 
 // ---------------------------------------------------------------- routing a stored message
+
+const getOurAddresses = cache((db: DB): string[] => [
+  ...(db.prepare(`SELECT email FROM gmail_accounts`).all() as { email: string }[]).map((r) => r.email),
+  ...(db.prepare(`SELECT DISTINCT account FROM threads`).all() as { account: string }[]).map((r) => r.account),
+]);
+
+const getContactsByClient = cache((db: DB): Map<string, string[]> => {
+  const rows = db.prepare(`SELECT email, client_id FROM contacts`).all() as { email: string; client_id: string }[];
+  const map = new Map<string, string[]>();
+  for (const r of rows) {
+    const list = map.get(r.client_id) ?? [];
+    list.push(r.email);
+    map.set(r.client_id, list);
+  }
+  return map;
+});
 
 interface MessageRow {
   id: string;
@@ -187,13 +204,8 @@ export function contextForMessage(
     .get(messageId) as MessageRow | undefined;
   if (!m) return null;
   const attachments = db.prepare(`SELECT mime_type AS mimeType FROM attachments WHERE message_id = ?`).all(messageId) as { mimeType: string }[];
-  const contacts = m.client_id
-    ? (db.prepare(`SELECT email FROM contacts WHERE client_id = ?`).all(m.client_id) as { email: string }[]).map((r) => r.email)
-    : [];
-  const ours = [
-    ...(db.prepare(`SELECT email FROM gmail_accounts`).all() as { email: string }[]).map((r) => r.email),
-    ...(db.prepare(`SELECT DISTINCT account FROM threads`).all() as { account: string }[]).map((r) => r.account),
-  ];
+  const contacts = m.client_id ? (getContactsByClient(db).get(m.client_id) ?? []) : [];
+  const ours = getOurAddresses(db);
   let domains: string[] = [];
   try {
     domains = m.client_domains ? JSON.parse(m.client_domains) : [];

@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 /** Refreshes the server-rendered inbox every few seconds so new mail shows up on its own. */
-export function AutoRefresh({ everyMs = 5000 }: { everyMs?: number }) {
+export function AutoRefresh({ everyMs = 15_000 }: { everyMs?: number }) {
   const router = useRouter();
   useEffect(() => {
     const t = setInterval(() => router.refresh(), everyMs);

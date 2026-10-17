@@ -1,10 +1,10 @@
-# Client Pulse
+# Reasoning Intelligence
 
 **Every AI claim about a client project is evidence-backed, model-reviewed and human-approved — and here is the scoreboard that shows which model you can trust with your data.**
 
-Client Pulse turns a shared Gmail inbox into a live view of every client project. Each inbound email and attachment is parsed, matched to a client and project, and folded into a running project state: open asks, commitments, deadlines, decisions, risks. A second model reviews every claim against its evidence before it is shown. The system proposes next actions (draft reply or internal task); a person approves, edits or rejects each one, and only approved actions run — as Gmail drafts, never sends.
+Reasoning Intelligence turns a shared Gmail inbox into a live view of every client project. Each inbound email and attachment is parsed, matched to a client and project, and folded into a running project state: open asks, commitments, deadlines, decisions, risks. A second model reviews every claim against its evidence before it is shown. The system proposes next actions (draft reply or internal task); a person approves, edits or rejects each one, and only approved actions run — as Gmail drafts, never sends.
 
-6-hour hackathon build for Aperium AI. Full spec: *Client Pulse — PRD* (Oct 17, 2026).
+6-hour hackathon build for Aperium AI. Full spec: *Reasoning Intelligence — PRD* (Oct 17, 2026).
 
 ## Win conditions
 
@@ -69,7 +69,7 @@ Each stage picks up `messages.status` from the previous one: `ingested → extra
 
 ## Setup
 
-**1. Use Node 22 LTS** (22.13 or newer; 24 also works). Client Pulse uses Node's built-in SQLite, so nothing is compiled during install.
+**1. Use Node 22 LTS** (22.13 or newer; 24 also works). Reasoning Intelligence uses Node's built-in SQLite, so nothing is compiled during install.
 
 ```bash
 node -v
@@ -263,7 +263,7 @@ On the seed inbox, all 15 emails are filed to their labeled project, at 0.88–0
 
 ## Data model
 
-SQLite via Node's built-in `node:sqlite` (WAL, shared by the web app and the worker) at `data/client-pulse.db`, schema in `src/lib/db.ts`. Plain SQL types, so it ports to Supabase/Postgres.
+SQLite via Node's built-in `node:sqlite` (WAL, shared by the web app and the worker) at `data/reasoning-intelligence.db`, schema in `src/lib/db.ts`. Plain SQL types, so it ports to Supabase/Postgres.
 
 | Table | Key fields |
 |---|---|
@@ -334,3 +334,4 @@ All in `src/lib/contracts.ts` as zod schemas, so prompts and the server agree on
 - Test inbox address, and who holds its login?
 - Judging criteria — repo, video or live demo?
 - Which two model pairs do we compare, and do we have keys for both? (Defaults: Sonnet→Opus vs Haiku→Sonnet.)
+

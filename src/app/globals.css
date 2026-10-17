@@ -1,5 +1,5 @@
 /*
- * Client Pulse design system (team design.md spec): "Editorial precision meets high-velocity ops".
+ * Reasoning Intelligence design system (team design.md spec): "Editorial precision meets high-velocity ops".
  * Warm light mode only, for projector clarity. Spec tokens first; the short aliases below
  * them are what component rules use.
  */
@@ -20,7 +20,7 @@
   --text-muted: #8c9099;
 
   /* brand + verification accents */
-  --accent-brand: #d94e34; /* Aperium terracotta */
+  --accent-brand: #d94e34; /* brand terracotta */
   --accent-evidence: #2563eb; /* citation cobalt */
   --accent-reviewer: #6d28d9; /* model review violet */
 

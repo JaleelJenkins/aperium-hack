@@ -12,7 +12,7 @@ export const config = {
     return path.resolve(process.env.DATA_DIR || "./data");
   },
   get dbPath() {
-    return path.join(this.dataDir, "client-pulse.db");
+    return path.join(this.dataDir, "reasoning-intelligence.db");
   },
   get attachmentsDir() {
     return path.join(this.dataDir, "attachments");
