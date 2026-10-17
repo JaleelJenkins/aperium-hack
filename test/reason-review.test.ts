@@ -328,7 +328,7 @@ describe("OpenRouter provider", () => {
     expect(r.input).toEqual({ signals: [] });
     expect(r.usage).toEqual({ input_tokens: 120, output_tokens: 30 });
     expect(r.cost_usd).toBe(0.00042);
-    expect(sent.tool_choice).toEqual({ type: "function", function: { name: "record_analysis" } });
+    expect(sent.tool_choice).toBe("auto");
     const user = (sent.messages as { role: string; content: unknown }[])[1];
     expect(user.content).toEqual([
       { type: "text", text: "hello" },

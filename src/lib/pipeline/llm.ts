@@ -10,6 +10,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { estimateCost, hasModelKey, routeModel, type Provider } from "./models";
 import { openRouterCall } from "./openrouter";
+import { withToolInstruction } from "./tool-instruction";
 
 export type ContentBlock = Anthropic.Messages.ContentBlockParam;
 
@@ -66,9 +67,9 @@ async function anthropicCall<T>(model: string, req: ToolCall<T>): Promise<LlmRes
   const res = await anthropic.messages.create({
     model,
     max_tokens: req.maxTokens ?? 4096,
-    system: req.system,
+    system: withToolInstruction(req.system, req.tool.name),
     tools: [req.tool],
-    tool_choice: { type: "tool", name: req.tool.name },
+    tool_choice: { type: "auto" },
     messages: [{ role: "user", content: req.content }],
   });
   const block = res.content.find((b) => b.type === "tool_use");

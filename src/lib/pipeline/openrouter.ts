@@ -5,6 +5,7 @@
  * typed result, same contract as the Anthropic adapter.
  */
 import type { ContentBlock, LlmResult, ToolCall } from "./llm";
+import { withToolInstruction } from "./tool-instruction";
 
 const ENDPOINT = process.env.OPENROUTER_BASE_URL?.trim() || "https://openrouter.ai/api/v1";
 
@@ -55,11 +56,11 @@ export async function openRouterCall<T>(
     model,
     max_tokens: req.maxTokens ?? 4096,
     messages: [
-      { role: "system", content: req.system },
+      { role: "system", content: withToolInstruction(req.system, req.tool.name) },
       { role: "user", content: toOpenRouterParts(req.content) },
     ],
     tools: [{ type: "function", function: { name: req.tool.name, description: req.tool.description, parameters: req.tool.input_schema } }],
-    tool_choice: { type: "function", function: { name: req.tool.name } },
+    tool_choice: "auto",
     usage: { include: true },
   });
   const headers = {
