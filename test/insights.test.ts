@@ -4,6 +4,8 @@ import { openDb, type DB } from "../src/lib/db";
 import { inspect } from "../src/lib/inspect";
 import { dismissInsight, evaluateRules, healthFrom, runInsights } from "../src/lib/pipeline/insights";
 import { applySeed, readSeed } from "../src/lib/seed";
+import { approveAction } from "../src/lib/approvals";
+import { runExecutor } from "../src/lib/pipeline/execute";
 
 const NOW = new Date("2026-10-17T12:00:00Z");
 const hoursAgo = (h: number) => new Date(NOW.getTime() - h * 3600_000).toISOString();
@@ -147,6 +149,29 @@ describe("insight rules", () => {
     expect(healthFrom(["low"])).toBe("on_track");
     expect(healthFrom(["low", "medium"])).toBe("at_risk");
     expect(healthFrom(["medium", "high"])).toBe("blocked");
+  });
+});
+
+describe("insights and the action queue", () => {
+  it("approving an internal task turns it into a commitment and clears the deadline insight", async () => {
+    const db = db0();
+    mail(db, "m1", "t1", "harbor-lobby", "dana@harborpine.com", hoursAgo(5));
+    // Real clock here: runExecutor recomputes insights at the current time.
+    const due = new Date(Date.now() + 30 * 3600_000).toISOString();
+    signal(db, "dl", "harbor-lobby", "m1", "deadline", "Revised scope due", due);
+    db.prepare(
+      `INSERT INTO actions (id, project_id, thread_id, message_id, type, payload_json, status, evidence_json, produced_by_model)
+       VALUES ('task', 'harbor-lobby', 't1', 'm1', 'internal_task', ?, 'proposed', ?, 'claude-haiku')`,
+    ).run(JSON.stringify({ title: "Send Dana the revised scope", notes: "" }), ev("m1"));
+    runInsights(db);
+    expect(openInsights(db).map((i) => i.kind)).toEqual(["deadline_no_commitment"]);
+
+    approveAction(db, "task", "user");
+    const r = await runExecutor(db, () => null, { onlyId: "task" });
+    expect(r.tasks).toBe(1);
+    expect(openInsights(db)).toHaveLength(0);
+    const verbs = (db.prepare(`SELECT verb FROM audit_events WHERE verb LIKE 'action.%' OR verb LIKE 'insight.%' ORDER BY id`).all() as { verb: string }[]).map((x) => x.verb);
+    expect(verbs).toEqual(["insight.opened", "action.approved", "action.executed", "insight.resolved"]);
   });
 });
 

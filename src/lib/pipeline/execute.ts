@@ -8,6 +8,7 @@
 import { randomUUID } from "node:crypto";
 import { checkSendable, type ActionRow } from "../approvals";
 import { audit, type DB } from "../db";
+import { runInsights } from "./insights";
 
 export interface DraftApi {
   createDraft(raw: string, threadId: string | null): Promise<{ id: string; messageId?: string | null }>;
@@ -119,6 +120,8 @@ export async function runExecutor(db: DB, apiFor: (account: string) => DraftApi 
       out.failed.push({ action: a.id, error });
     }
   }
+  // An approved task is now a commitment from us: it can clear "deadline with no commitment".
+  if (out.tasks) runInsights(db);
   return out;
 }
 
