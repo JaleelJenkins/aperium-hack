@@ -12,6 +12,10 @@ import { getDb } from "../src/lib/db";
 import { listAccounts } from "../src/lib/gmail/client";
 import { syncAll } from "../src/lib/ingest/sync";
 import { applySeed, readSeed } from "../src/lib/seed";
+import { hasApiKey } from "../src/lib/pipeline/llm";
+import { defaultDeps, describe, runPipeline } from "../src/lib/pipeline/run";
+
+const pipelineDeps = defaultDeps();
 
 const once = process.argv.includes("--once");
 let stopping = false;
@@ -35,6 +39,12 @@ async function tick(): Promise<void> {
     if (r.failed.length) parts.push(`${r.failed.length} failed (${r.failed.map((f) => f.error).join("; ")})`);
     if (r.newEmailIds.length || r.failed.length || r.mode === "bootstrap" || once) log(`${r.account}: ${parts.join(", ")}`);
   }
+  // Extract + Resolve whatever is waiting (new mail, or a backlog after adding an API key).
+  try {
+    for (const line of describe(await runPipeline(db, pipelineDeps))) log(line);
+  } catch (err) {
+    log(`pipeline failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 function log(msg: string): void {
@@ -43,6 +53,11 @@ function log(msg: string): void {
 
 async function main(): Promise<void> {
   log(`db ${config.dbPath}; polling every ${config.pollIntervalMs}ms${once ? " (once)" : ""}`);
+  log(
+    hasApiKey()
+      ? `pipeline: extract with ${pipelineDeps.extractor!.model}, resolve with ${pipelineDeps.matcher.model}`
+      : "pipeline: no ANTHROPIC_API_KEY, so attachments are not extracted and projects are matched by word overlap",
+  );
   const db = getDb();
   if (!(db.prepare(`SELECT 1 FROM clients LIMIT 1`).get())) {
     for (const w of applySeed(db, readSeed())) log(`seed: ${w}`);

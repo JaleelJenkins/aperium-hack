@@ -43,12 +43,12 @@ Each stage picks up `messages.status` from the previous one: `ingested → extra
 | | Disconnect wipes tokens and stored mail | P0 | ✅ | `src/app/api/auth/google/disconnect` |
 | | Gmail push (`users.watch` + Pub/Sub) | P2 | — | |
 | **F2 Extraction** | Email body → clean text | P0 | ✅ | `src/lib/ingest/clean.ts` |
-| | PDF to model as document, page numbers kept | P0 | ⬜ | `src/lib/pipeline/extract.ts` (planned) |
-| | Image: vision description + text | P0 | ⬜ | `src/lib/pipeline/extract.ts` (planned) |
+| | PDF to model as document, page numbers kept | P0 | ✅ | `src/lib/pipeline/extract.ts` |
+| | Image: vision description + text | P0 | ✅ | `src/lib/pipeline/extract.ts` |
 | | Audio, video, links | P2 | recorded, not downloaded | |
-| **F3 Resolution** | Client by sender domain; free-mail by contact (seed) | P0 | ⬜ data ready | `clients`, `contacts`, `seed/seed.json` |
-| | Reply inherits thread's project | P0 | ⬜ data ready | `threads.project_id` |
-| | New thread matched with confidence; below 0.7 → "new project?" card | P0 | ⬜ | `PROJECT_MATCH_THRESHOLD` in `contracts.ts` |
+| **F3 Resolution** | Client by sender domain; free-mail by contact (seed) | P0 | ✅ | `src/lib/pipeline/resolve.ts` |
+| | Reply inherits thread's project | P0 | ✅ | `src/lib/pipeline/resolve.ts` |
+| | New thread matched against project summaries with confidence; below 0.7 → "New project?" card | P0 | ✅ | `src/lib/pipeline/resolve.ts` |
 | **F4 State & insights** | Incremental project state update | P0 | ⬜ | `projects`, `signals` |
 | | Insight rules: unanswered ask, deadline w/o commitment, overdue commitment | P0 | ⬜ | `insights` |
 | **F5 Action queue** | Draft reply + internal task; proposed → approved/edited/rejected → executed/failed; reject needs a reason | P0 | ⬜ | `actions` |
@@ -127,7 +127,8 @@ npm run worker
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Gmail | OAuth client (Web application) |
 | `GOOGLE_REDIRECT_URI` | Gmail | default `http://localhost:3000/api/auth/google/callback` |
 | `TOKEN_ENCRYPTION_KEY` | Gmail | 32 bytes, base64 or hex: `openssl rand -base64 32` |
-| `ANTHROPIC_API_KEY` | Extract, Reason, Review | |
+| `ANTHROPIC_API_KEY` | Extract, Resolve, Reason, Review | Without it, Extract is skipped and Resolve falls back to word overlap |
+| `EXTRACT_MODEL`, `RESOLVE_MODEL` | Extract, Resolve | defaults `claude-sonnet-5-5`, `claude-haiku-5-5` |
 | `LIVE_DEMO_SENDER` | live demo | the teammate's phone address; `npm run seed` maps it to Harbor & Pine in place of `CHANGE_ME.live-demo` |
 | `DATA_DIR` | storage | SQLite DB + attachments, default `./data` (gitignored) |
 | `POLL_INTERVAL_MS` | worker | default `10000` |
@@ -219,6 +220,23 @@ npm run seed:inbox
 
 Not seeded. A teammate sends it live from their phone to the inbox, from the address in `LIVE_DEMO_SENDER` (`.env.local`). Subject: *Revised scope: please confirm by Thursday*. Attachment: `seed/assets/harbor-revised-scope-v2.pdf`. Body: the `LIVE_DEMO_EMAIL` text in `seed/emails.ts`.
 
+## Extract and Resolve
+
+The worker runs both stages after every poll. `npm run pipeline` runs them once over anything waiting. Each message's `status` moves `ingested → extracted → resolved`.
+
+**Extract** (`src/lib/pipeline/extract.ts`). Claude reads every stored PDF and image attachment through a forced tool call, so it always returns structured JSON.
+- **PDFs:** sent as a document; the text of each page is stored separately in `attachments.meta_json.pageText`. That's what lets evidence say `attachment:<id>#p2` and lets the evidence checker verify a quote is really on page 2.
+- **Images:** a factual description plus all visible text (error messages, handwritten measurements).
+- A failed attachment is marked `failed` with its error and doesn't hold the email back.
+
+**Resolve** (`src/lib/pipeline/resolve.ts`). Each thread is filed to a client and project:
+1. A reply inherits its thread's project.
+2. The client comes from an exact contact match, which covers free-mail senders like gmail.com, or else from the sender's domain.
+3. A new thread is compared with that client's **project summaries** (`seed/seed.json`, editable on the project) and assigned with a confidence score. The model and its one-line reason are stored on the thread (`assigned_by`, `assignment_reason`).
+4. Below 0.7 confidence, or from an unknown sender, it raises a **"New project?"** card in the approval queue, naming the closest project, instead of making a silent guess.
+
+On the seed inbox, all 15 emails are filed to their labeled project, at 0.88–0.99 confidence even with the offline word-overlap fallback.
+
 ## Scripts
 
 | Command | What it does |
@@ -226,8 +244,10 @@ Not seeded. A teammate sends it live from their phone to the inbox, from the add
 | `npm run setup` | Create `.env.local`, generate the token key, load seed data (safe to re-run) |
 | `npm run dev` | Dashboard and API routes on http://localhost:3000 |
 | `npm run worker` | Ingest loop; seeds an empty database on first start |
-| `npm run worker:once` | One ingest pass, then exit |
+| `npm run worker:once` | One ingest pass (plus Extract and Resolve), then exit |
+| `npm run pipeline` | Run Extract and Resolve over everything waiting, without polling Gmail |
 | `npm run seed` | Re-apply `seed/seed.json` after editing it |
+| `npm run seed -- --summaries` | Also overwrite project summaries with the seed versions |
 | `npm run seed:inbox` | Put the 15 demo emails into the connected inbox (`-- --dry-run` to preview) |
 | `npm run seed:labels` | Regenerate `seed/labels.json` after editing `seed/emails.ts` |
 | `npm run db:reset` | Back to a clean demo state, keeping Gmail connected |
