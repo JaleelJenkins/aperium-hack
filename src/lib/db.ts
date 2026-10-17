@@ -399,7 +399,14 @@ const MIGRATIONS: string[] = [
   ALTER TABLE pipeline_runs ADD COLUMN provider    TEXT;     -- anthropic | openrouter | mixed
   `,
 
-  /* 006: team review rules (the approval review step) and human approval decisions */ `
+  /* 006: Performance indexes for dashboard queries */ `
+  CREATE INDEX IF NOT EXISTS signals_project_status_idx ON signals(project_id, status);
+  CREATE INDEX IF NOT EXISTS signals_due_status_idx ON signals(status, type, due_at);
+  CREATE INDEX IF NOT EXISTS attachments_status_kind_idx ON attachments(status, kind);
+  CREATE INDEX IF NOT EXISTS route_decisions_src_msg_idx ON route_decisions(source, message_id);
+  `,
+
+  /* 007: team review rules (the approval review step) and human approval decisions */ `
   -- Rules the team writes once and every future email is held to. instruction rules are
   -- given to Reason (to follow) and Review (to enforce); block_phrase / block_domain rules
   -- are checked in code after Review, before anything reaches the approval queue.
@@ -433,7 +440,18 @@ export function openDb(file: string): DB {
   if (file !== ":memory:") fs.mkdirSync(path.dirname(file), { recursive: true });
   const db = new DB(file);
   // WAL: the worker and the web app share the file.
-  db.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON;");
+  // cache_size: 4 MB page cache (negative = kibibytes). mmap_size: 128 MB memory-mapped I/O.
+  // synchronous=NORMAL: safe under WAL (no data loss on crash), halves fsync stalls vs FULL.
+  // temp_store=MEMORY: sorts/indexes in memory rather than temp files.
+  db.exec(`
+    PRAGMA journal_mode   = WAL;
+    PRAGMA busy_timeout   = 5000;
+    PRAGMA foreign_keys   = ON;
+    PRAGMA cache_size     = -4096;
+    PRAGMA mmap_size      = 134217728;
+    PRAGMA synchronous    = NORMAL;
+    PRAGMA temp_store     = MEMORY;
+  `);
   migrate(db);
   return db;
 }
@@ -448,12 +466,12 @@ function migrate(db: DB): void {
   }
 }
 
-const g = globalThis as unknown as { __clientPulseDb?: DB };
+const g = globalThis as unknown as { __reasoningIntelligenceDb?: DB };
 
 /** Process-wide connection (survives Next.js dev hot reloads). */
 export function getDb(): DB {
-  if (!g.__clientPulseDb) g.__clientPulseDb = openDb(config.dbPath);
-  return g.__clientPulseDb;
+  if (!g.__reasoningIntelligenceDb) g.__reasoningIntelligenceDb = openDb(config.dbPath);
+  return g.__reasoningIntelligenceDb;
 }
 
 /** Append to audit_events. objectRef is "<type>:<id>", e.g. "message:18f3a". */

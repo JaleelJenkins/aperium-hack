@@ -66,7 +66,7 @@ export async function openRouterCall<T>(
     Authorization: `Bearer ${apiKey}`,
     "Content-Type": "application/json",
     "HTTP-Referer": process.env.OPENROUTER_REFERER?.trim() || "http://localhost:3000",
-    "X-Title": "Client Pulse",
+    "X-Title": "Reasoning Intelligence",
   };
 
   const retries = opts.maxRetries ?? 3;

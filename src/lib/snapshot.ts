@@ -48,7 +48,7 @@ export function saveSnapshot(db: DB, name: string): SnapshotInfo {
   const dir = path.join(snapshotsDir(), name);
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(dir, { recursive: true });
-  db.exec(`VACUUM INTO ${sqlString(path.join(dir, "client-pulse.db"))}`);
+  db.exec(`VACUUM INTO ${sqlString(path.join(dir, "reasoning-intelligence.db"))}`);
 
   const hasAttachments = fs.existsSync(config.attachmentsDir);
   if (hasAttachments) fs.cpSync(config.attachmentsDir, path.join(dir, "attachments"), { recursive: true });
@@ -81,7 +81,7 @@ export interface RestoreResult {
 export function restoreSnapshot(db: DB, name: string): RestoreResult {
   assertName(name);
   const dir = path.join(snapshotsDir(), name);
-  const file = path.join(dir, "client-pulse.db");
+  const file = path.join(dir, "reasoning-intelligence.db");
   if (!fs.existsSync(file)) {
     const known = listSnapshots().map((s) => s.name);
     throw new Error(`No snapshot "${name}".${known.length ? ` Available: ${known.join(", ")}` : " Save one with npm run demo:snapshot."}`);

@@ -11,12 +11,16 @@
  *
  * Threads with no project yet go to a single "Needs triage" lane at the top.
  */
+import { cache } from "react";
 import type { DB } from "./db";
 import type { Evidence } from "./contracts";
 import { evidenceHref } from "./evidence";
 import { modelFamily } from "./router/leaderboard";
-import { getLeaderboard, getRouterSettings, projectRouting, routeMessage, type ProjectRouting } from "./router/store";
-import type { RoutingPolicyMode } from "./router/types";
+import { getLeaderboard, getRouterSettings, routeMessage, type ProjectRouting } from "./router/store";
+import { POLICY_MODES, type RoutingPolicyMode } from "./router/types";
+
+const isPolicy = (v: unknown): v is RoutingPolicyMode =>
+  typeof v === "string" && (POLICY_MODES as string[]).includes(v);
 
 export const COLUMNS = [
   { id: "triage", title: "Triage", hint: "New mail being processed" },
@@ -198,7 +202,7 @@ export function clientPrefix(name: string): string {
  * client ("HP-1", "HP-2", ...). Stable as long as rows aren't deleted, which the pipeline
  * never does outside a demo reset.
  */
-export function ticketKeys(db: DB): Map<string, string> {
+export const ticketKeys = cache((db: DB): Map<string, string> => {
   const rows = db
     .prepare(
       `SELECT x.id, c.name AS client_name FROM (
@@ -218,17 +222,17 @@ export function ticketKeys(db: DB): Map<string, string> {
     keys.set(r.id, `${prefix}-${n}`);
   }
   return keys;
-}
+});
 
 /**
  * Model profile id -> concrete model name ("claude-haiku" -> "claude-haiku-5-5"), so cards
  * show the real model in the chain of custody. Unknown ids pass through unchanged.
  */
-export function modelNames(db: DB): (id: string | null) => string | null {
+export const modelNames = cache((db: DB): ((id: string | null) => string | null) => {
   const rows = db.prepare(`SELECT id, model_name FROM model_profiles`).all() as { id: string; model_name: string }[];
   const map = new Map(rows.map((r) => [r.id, r.model_name]));
   return (id) => (id == null ? null : (map.get(id) ?? id));
-}
+});
 
 /** Filenames for attachment ids, for evidence chips. */
 export function attachmentNames(db: DB, ids: Iterable<string>): Map<string, string> {
@@ -380,18 +384,26 @@ export function getBoard(db: DB, opts: { filter?: BoardFilter; now?: number } = 
   const routerSettings = getRouterSettings(db);
   const leaderboard = getLeaderboard(db);
   const pairById = new Map(leaderboard.map((p) => [p.id, p]));
-  const recorded = db.prepare(
-    `SELECT policy, pair_id, escalated, triggers_json, reason, est_cost_usd, est_latency_ms FROM route_decisions
-      WHERE message_id = ? AND source = 'pipeline' ORDER BY at DESC LIMIT 1`,
+  // Pre-load all pipeline route decisions in one query; fall back to live routing only for
+  // messages that have no recorded decision (much rarer than iterating every card).
+  const recordedDecisions = new Map(
+    (db
+      .prepare(
+        `SELECT message_id, policy, pair_id, escalated, triggers_json, reason, est_cost_usd, est_latency_ms
+           FROM route_decisions WHERE source = 'pipeline'
+           GROUP BY message_id HAVING MAX(at)`,
+      )
+      .all() as {
+      message_id: string; policy: RoutingPolicyMode; pair_id: string; escalated: number;
+      triggers_json: string; reason: string; est_cost_usd: number; est_latency_ms: number;
+    }[]).map((r) => [r.message_id, r]),
   );
   const routes = new Map<string, RouteTrace | null>();
   const routeFor = (messageId: string | null): RouteTrace | null => {
     if (!messageId) return null;
     if (routes.has(messageId)) return routes.get(messageId)!;
     let trace: RouteTrace | null = null;
-    const r = recorded.get(messageId) as
-      | { policy: RoutingPolicyMode; pair_id: string; escalated: number; triggers_json: string; reason: string; est_cost_usd: number; est_latency_ms: number }
-      | undefined;
+    const r = recordedDecisions.get(messageId);
     if (r) {
       const p = pairById.get(r.pair_id);
       trace = {
@@ -430,6 +442,23 @@ export function getBoard(db: DB, opts: { filter?: BoardFilter; now?: number } = 
     return trace;
   };
 
+  // Bulk-load routing overrides for all projects in one query to avoid N+1 DB round-trips.
+  const routingOverrides = new Map(
+    (db.prepare(`SELECT id, routing_policy, pinned_pair_id FROM projects WHERE status != 'archived'`).all() as {
+      id: string; routing_policy: string | null; pinned_pair_id: string | null;
+    }[]).map((r) => [r.id, r])
+  );
+  const routingFor = (projectId: string): ProjectRouting => {
+    const row = routingOverrides.get(projectId);
+    const own = isPolicy(row?.routing_policy) ? row!.routing_policy : null;
+    return {
+      projectId,
+      policy: own ?? routerSettings.defaultPolicy,
+      pinnedPairId: row?.pinned_pair_id ?? routerSettings.pinnedPairId,
+      inherited: own === null,
+    };
+  };
+
   const lanes = new Map<string, Lane>();
   const doneAll = new Map<string, BoardCard[]>();
   for (const p of projects) {
@@ -445,7 +474,7 @@ export function getBoard(db: DB, opts: { filter?: BoardFilter; now?: number } = 
       doneTotal: 0,
       stats: { open: 0, overdue: 0, dueSoon: 0, approvals: 0, blockedByReview: blockedByProject.get(p.id) ?? 0 },
       attention: 0,
-      routing: projectRouting(db, p.id, routerSettings),
+      routing: routingFor(p.id),
     });
     doneAll.set(p.id, []);
   }
@@ -625,11 +654,48 @@ export function getBoard(db: DB, opts: { filter?: BoardFilter; now?: number } = 
 }
 
 /**
- * Sidebar: clients with their worst project health, derived exactly as the board does
- * (so an overdue item turns the dot amber here too). Small tables; fine on every page.
+ * Sidebar: clients with their worst project health. Uses a direct SQL query
+ * rather than calling getBoard() to avoid loading all signals/actions/mail
+ * just to render the nav dots.
  */
-export function listClientsForNav(db: DB): { id: string; name: string; projects: number; health: Health }[] {
-  return getBoard(db)
-    .clients.map((g) => ({ id: g.id, name: g.name, projects: g.lanes.length, health: g.health }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+export function listClientsForNav(db: DB, now = Date.now()): { id: string; name: string; projects: number; health: Health }[] {
+  const nowIso = new Date(now).toISOString();
+  const rows = db
+    .prepare(
+      `SELECT c.id, c.name,
+              COUNT(DISTINCT p.id) AS projects,
+              CASE
+                WHEN MAX(CASE
+                  WHEN p.health = 'blocked' THEN 2
+                  WHEN p.health = 'at_risk' OR EXISTS (
+                    SELECT 1 FROM signals s
+                     WHERE s.project_id = p.id
+                       AND s.status = 'open'
+                       AND s.type != 'decision'
+                       AND s.due_at IS NOT NULL
+                       AND s.due_at < ?
+                  ) THEN 1
+                  ELSE 0
+                END) = 2 THEN 'blocked'
+                WHEN MAX(CASE
+                  WHEN p.health = 'blocked' THEN 2
+                  WHEN p.health = 'at_risk' OR EXISTS (
+                    SELECT 1 FROM signals s
+                     WHERE s.project_id = p.id
+                       AND s.status = 'open'
+                       AND s.type != 'decision'
+                       AND s.due_at IS NOT NULL
+                       AND s.due_at < ?
+                  ) THEN 1
+                  ELSE 0
+                END) = 1 THEN 'at_risk'
+                ELSE 'on_track'
+              END AS health
+         FROM clients c
+         JOIN projects p ON p.client_id = c.id AND p.status != 'archived'
+        GROUP BY c.id, c.name
+        ORDER BY c.name`,
+    )
+    .all(nowIso, nowIso) as { id: string; name: string; projects: number; health: Health }[];
+  return rows;
 }

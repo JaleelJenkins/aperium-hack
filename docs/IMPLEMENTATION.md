@@ -1,4 +1,4 @@
-# Client Pulse: implementation brainstorm
+# Reasoning Intelligence: implementation brainstorm
 
 Companion to the PRD and the [README](../README.md). This file records the decisions that turn the PRD into a build we can finish in **5 hours**: the gaps found in review, the contracts, the order of work and what we cut if we fall behind.
 
@@ -33,9 +33,9 @@ Companion to the PRD and the [README](../README.md). This file records the decis
 ## 1. Stack (as built on `main`)
 
 See the README for setup and the full status table. The essentials:
-- **Next.js + TypeScript** under `src/`. **SQLite via `node:sqlite`** at `data/client-pulse.db`, in WAL mode, with `user_version` migrations in `src/lib/db.ts`.
+- **Next.js + TypeScript** under `src/`. **SQLite via `node:sqlite`** at `data/reasoning-intelligence.db`, in WAL mode, with `user_version` migrations in `src/lib/db.ts`.
 - **Worker**: `npm run worker` (`worker/ingest.ts`) polls Gmail every 10 s. Each pipeline stage advances `messages.status`: `ingested → extracted → resolved → reasoned → reviewed`.
-- **The fallback demo state is a copy of the DB file**: snapshot `data/client-pulse.db` after the eval, and restore it with one `cp`. It costs nothing and is the best mitigation we have.
+- **The fallback demo state is a copy of the DB file**: snapshot `data/reasoning-intelligence.db` after the eval, and restore it with one `cp`. It costs nothing and is the best mitigation we have.
 - **Still to add**: `@anthropic-ai/sdk` (structured outputs; PDFs and images go in as base64 `document` and `image` blocks), and per-page PDF text via `unpdf`. We need our own page text to verify quotes and to show evidence.
 
 ## 2. Where the remaining work goes
@@ -261,7 +261,7 @@ The block reason must name the evidence location, for example "PDF p.2 title blo
 | **1:45–2:45** | Executor (`drafts.create` in the thread), action API, audit log. | `review.ts`, `pipeline.ts`, insights and health. | Action inbox (approve, edit, reject with reason), Caught by review. | Seed the inbox. QA the threading. Write the pitch. |
 | **2:45–3:30** | Reset script and snapshot. Then take over eval runs. | `eval.ts`. Run pairs A and B. Tune the traps. **Second-vendor adapter (hard stop 3:30).** | Scoreboard and model picker. | First full dry run of the demo. |
 | **3:30–4:00** | Fix the worst misses only. | | | Live-email rehearsal from the phone. |
-| **4:00 FREEZE** | Snapshot `data/client-pulse.db` (it holds `eval_runs` too). Record the fallback video of the live step. Rehearse twice. | | | |
+| **4:00 FREEZE** | Snapshot `data/reasoning-intelligence.db` (it holds `eval_runs` too). Record the fallback video of the live step. Rehearse twice. | | | |
 
 With 3 people, Product/demo folds into the AI pipeline role (fixtures *are* the AI person's test data) after T+1:45.
 
@@ -284,7 +284,7 @@ With 3 people, Product/demo folds into the AI pipeline role (fixtures *are* the 
 - [ ] Phone: teammate's Gmail ready, recipient typed, PDF attached in drafts, waiting for "send".
 - [ ] Phone hotspot as a backup network.
 - [ ] Worker running. "Sync now" visible. Pipeline latency checked with Haiku Reason (target < 30 s).
-- [ ] A copy of `data/client-pulse.db` (with `eval_runs`) saved outside `data/`. One command restores them.
+- [ ] A copy of `data/reasoning-intelligence.db` (with `eval_runs`) saved outside `data/`. One command restores them.
 - [ ] Fallback video of step 4 on the desktop.
 - [ ] Anthropic API key loaded, with headroom on its rate limit (the eval at concurrency 5 is the peak).
 
@@ -299,3 +299,4 @@ Still open:
 2. What is the test inbox address, and who holds its login?
 3. Which second vendor and model are we using, and who has the key?
 4. Judging format: live demo only, or also a repo or video? (This decides how much README polish we need.)
+

@@ -14,11 +14,10 @@ const sans = Plus_Jakarta_Sans({ subsets: ["latin"], variable: "--font-sans", di
 const mono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-mono", display: "swap" });
 
 export const metadata: Metadata = {
-  title: "Client Pulse",
+  title: "Reasoning Intelligence",
   description: "Every AI claim about a client project is evidence-backed, model-reviewed and human-approved.",
 };
 
-export const dynamic = "force-dynamic";
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   const db = getDb();
@@ -36,8 +35,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <a href="/" className="brand">
               <span className="brand-mark" aria-hidden="true" />
               <span className="brand-text">
-                <span className="brand-name">Client Pulse</span>
-                <span className="brand-by">by Aperium</span>
+                <span className="brand-name">Reasoning Intelligence</span>
               </span>
             </a>
 

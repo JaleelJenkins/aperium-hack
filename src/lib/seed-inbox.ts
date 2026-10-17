@@ -67,7 +67,7 @@ export function buildMime(m: MimeInput): string {
     ...(m.inReplyTo ? [`In-Reply-To: ${m.inReplyTo}`] : []),
     ...(m.references ? [`References: ${m.references}`] : []),
     "MIME-Version: 1.0",
-    "X-Client-Pulse-Seed: 1",
+    "X-Reasoning-Intelligence-Seed: 1",
   ];
   const textPart = [
     'Content-Type: text/plain; charset="UTF-8"',

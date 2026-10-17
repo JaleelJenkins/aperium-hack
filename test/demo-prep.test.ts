@@ -50,7 +50,7 @@ describe("demo snapshots", () => {
   beforeEach(() => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), "pulse-snap-"));
     process.env.DATA_DIR = dir;
-    db = openDb(path.join(dir, "client-pulse.db"));
+    db = openDb(path.join(dir, "reasoning-intelligence.db"));
     applySeed(db, readSeed());
     db.prepare(`INSERT INTO threads (gmail_thread_id, account, project_id) VALUES ('t1', 'a@x.com', 'harbor-lobby')`).run();
     db.prepare(

@@ -1,9 +1,16 @@
+import { cache } from "react";
 import { getDb } from "@/lib/db";
 import { listAccounts } from "@/lib/gmail/client";
 import { ago } from "../format";
 import { SyncNowButton } from "./LiveControls";
 
 type Flash = { error?: string; connected?: string; disconnected?: string };
+
+/**
+ * Memoized per-request accounts fetch. React.cache deduplicates calls within a
+ * single server render so InboxStatus and ConnectionControls share one DB query.
+ */
+const getAccounts = cache(() => listAccounts(getDb()));
 
 /** OAuth callback / disconnect redirect back with these query params. */
 export function ConnectionBanners({ error, connected, disconnected }: Flash) {
@@ -18,7 +25,7 @@ export function ConnectionBanners({ error, connected, disconnected }: Flash) {
 
 /** Inbox status line: which account, when it last synced, and any sync error. */
 export function InboxStatus() {
-  const accounts = listAccounts(getDb());
+  const accounts = getAccounts();
   if (accounts.length === 0) return <span className="muted">No inbox connected</span>;
   return (
     <span className="inbox-status">
@@ -36,7 +43,7 @@ export function InboxStatus() {
 
 /** Sync now + Connect / Reconnect / Disconnect. */
 export function ConnectionControls() {
-  const connected = listAccounts(getDb()).length > 0;
+  const connected = getAccounts().length > 0;
   return (
     <div className="row" style={{ gap: 8 }}>
       {connected && <SyncNowButton />}
