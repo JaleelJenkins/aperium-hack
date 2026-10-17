@@ -274,6 +274,10 @@ export const REASON_TOOL = {
   input_schema: {
     type: "object" as const,
     properties: {
+      reasoning: {
+        type: "string",
+        description: "A short plain-language note on how you read this email and its attachments and why you chose these items. Shown to the user.",
+      },
       signals: {
         type: "array",
         items: {
@@ -360,6 +364,7 @@ Rules:
 // ------------------------------------------------------------------ the call
 
 export interface RawReason {
+  reasoning?: unknown;
   signals?: unknown[];
   closes_signal_ids?: unknown[];
   insights?: unknown[];
