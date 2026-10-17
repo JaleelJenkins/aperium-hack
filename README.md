@@ -54,7 +54,8 @@ Each stage picks up `messages.status` from the previous one: `ingested → extra
 | **F5 Action queue** | Draft reply + internal task; proposed → approved/edited/rejected → executed/failed; reject needs a reason | P0 | ⬜ | `actions` |
 | | Executor calls `drafts.create` in thread only, never `messages.send` | P0 | ⬜ scope granted | `gmail.compose` |
 | | Every decision audited | P0 | ✅ table + helper | `audit_events`, `audit()` |
-| **F6 Views** | Portfolio · Project page · Action inbox · Evidence drawer · Caught by review · Scoreboard | P0 | ⬜ | `src/app/` |
+| **F6 Views** | Portfolio board: client/project swimlanes × workflow columns (Triage · Waiting on us · Waiting on client · Needs approval · Done), sorted by risk | P0 | ✅ | `src/app/page.tsx`, `src/lib/board.ts` |
+| | Project page · Action inbox · Evidence drawer · Caught by review · Scoreboard | P0 | ⬜ | `src/app/` |
 | | Message source view with line anchors (evidence target) | P0 | ✅ | `src/app/messages/[id]` |
 | | Activity & audit feed | P1 | ⬜ | |
 | **F7 Review & eval** | Output + review contracts | P0 | ✅ | `src/lib/contracts.ts` |
@@ -159,6 +160,7 @@ npm run worker
 | `npm run seed` | Re-apply `seed/seed.json` after editing it |
 | `npm run db:reset` | Back to a clean demo state, keeping Gmail connected |
 | `npm run db:reset -- --all` | Same, and disconnect Gmail (wipes tokens) |
+| `npm run demo:ui` | **Dev only:** fill the board with the PRD demo story (rows prefixed `demo-`) to build UI before the pipeline exists. Refuses if real mail is present; `-- --clear` removes them; `db:reset` wipes them too |
 | `npm test` | Cleaner, parser, sync, evidence, contracts, crypto, seed and DB tests |
 | `npm run typecheck` | TypeScript check |
 | `npm run build` | Production build |

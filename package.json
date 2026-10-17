@@ -11,6 +11,7 @@
     "worker:once": "tsx worker/ingest.ts --once",
     "seed": "tsx scripts/seed.ts",
     "db:reset": "tsx scripts/db-reset.ts",
+    "demo:ui": "tsx scripts/demo-ui.ts",
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
