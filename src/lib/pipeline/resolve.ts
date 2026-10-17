@@ -38,6 +38,8 @@ export interface MatchResult {
   confidence: number;
   reason: string;
   new_project_name: string | null;
+  /** Who decided, when a matcher combines several (e.g. "rule" on the fast path). */
+  by?: string;
 }
 
 export interface Matcher {
@@ -167,6 +169,25 @@ export function heuristicMatcher(): Matcher {
   };
 }
 
+/**
+ * Fast path: the word-overlap matcher decides when it's clear-cut (one clear winner
+ * among the client's project summaries), and only ambiguous emails pay for a model
+ * call. On the seed inbox every thread is clear-cut, so filing takes milliseconds.
+ */
+export const RESOLVE_FAST_THRESHOLD = Number(process.env.RESOLVE_FAST_THRESHOLD) || 0.85;
+
+export function fastFirstMatcher(model: Matcher, threshold = RESOLVE_FAST_THRESHOLD): Matcher {
+  const rule = heuristicMatcher();
+  return {
+    model: model.model,
+    async match(input, candidates) {
+      const quick = await rule.match(input, candidates);
+      if (quick.project_id && quick.confidence >= threshold) return { ...quick, by: "rule" };
+      return model.match(input, candidates);
+    },
+  };
+}
+
 // ------------------------------------------------------------------ the stage
 
 interface PendingMessage {
@@ -256,19 +277,19 @@ export async function runResolve(db: DB, matcher: Matcher, opts: { limit?: numbe
         db.transaction(() => {
           db.prepare(
             `UPDATE threads SET project_id = ?, assignment_confidence = ?, assigned_by = ?, assignment_reason = ? WHERE gmail_thread_id = ?`,
-          ).run(match.project_id, match.confidence, matcher.model, match.reason, m.thread_id);
+          ).run(match.project_id, match.confidence, match.by ?? matcher.model, match.reason, m.thread_id);
           markResolved(db, m, match.project_id!);
-          audit(db, matcher.model, "thread.assigned", `thread:${m.thread_id}`, {
+          audit(db, match.by ?? matcher.model, "thread.assigned", `thread:${m.thread_id}`, {
             message: m.id,
             project: match.project_id,
             confidence: match.confidence,
             reason: match.reason,
           });
         })();
-        result.assigned.push({ message: m.id, project: match.project_id, confidence: match.confidence, by: matcher.model });
+        result.assigned.push({ message: m.id, project: match.project_id, confidence: match.confidence, by: match.by ?? matcher.model });
       } else {
         // 4. Low confidence: a person decides.
-        newProjectCard(db, m, client.id, match, matcher.model, candidates);
+        newProjectCard(db, m, client.id, match, match.by ?? matcher.model, candidates);
         result.cards.push({ message: m.id, reason: match.reason });
       }
     } catch (err) {
