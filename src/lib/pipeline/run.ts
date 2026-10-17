@@ -13,7 +13,7 @@ import type { DB } from "../db";
 import { claudeExtractor, runExtract, type ExtractResult, type Extractor } from "./extract";
 import { hasApiKey, pipelineLlm } from "./llm";
 import { runInsights, type InsightsResult } from "./insights";
-import { claudeMatcher, heuristicMatcher, runResolve, type Matcher, type ResolveResult } from "./resolve";
+import { claudeMatcher, fastFirstMatcher, heuristicMatcher, runResolve, type Matcher, type ResolveResult } from "./resolve";
 import { runReasonReview, type ReasonReviewDeps, type ReasonReviewResult } from "./review";
 
 export interface PipelineDeps {
@@ -27,7 +27,8 @@ export interface PipelineDeps {
 export function defaultDeps(): PipelineDeps {
   if (!hasApiKey()) return { extractor: null, matcher: heuristicMatcher(), reasonReview: null };
   const llm = pipelineLlm();
-  return { extractor: claudeExtractor(llm), matcher: claudeMatcher(llm), reasonReview: { llm } };
+  // Clear-cut threads are filed by word overlap; only ambiguous ones call the model.
+  return { extractor: claudeExtractor(llm), matcher: fastFirstMatcher(claudeMatcher(llm)), reasonReview: { llm } };
 }
 
 export interface PipelineResult {
@@ -35,10 +36,12 @@ export interface PipelineResult {
   resolve: ResolveResult;
   reasonReview: ReasonReviewResult | null;
   insights: InsightsResult;
+  /** Wall-clock time for this run. */
+  elapsedMs?: number;
 }
 
 /** How many emails go through the pipeline at once (each is a few model calls). */
-export const PIPELINE_CONCURRENCY = Math.max(1, Number(process.env.PIPELINE_CONCURRENCY) || 4);
+export const PIPELINE_CONCURRENCY = Math.max(1, Number(process.env.PIPELINE_CONCURRENCY) || 6);
 
 const emptyResult = (deps: PipelineDeps): Omit<PipelineResult, "insights"> & { insights?: InsightsResult } => ({
   extract: deps.extractor ? { messages: 0, attachments: 0, failed: [] } : null,
@@ -58,6 +61,7 @@ export async function runPipeline(
   deps: PipelineDeps = defaultDeps(),
   opts: { dataDir?: string; now?: Date; concurrency?: number; limit?: number } = {},
 ): Promise<PipelineResult> {
+  const started = Date.now();
   const out = emptyResult(deps);
   const rows = db
     .prepare(
@@ -105,7 +109,7 @@ export async function runPipeline(
   await Promise.all(workers);
   // Deterministic insight rules and project health over everything stored (no model call).
   const insights = runInsights(db, { now: opts.now });
-  return { ...out, insights };
+  return { ...out, insights, elapsedMs: Date.now() - started };
 }
 
 export function describe(r: PipelineResult): string[] {
@@ -140,10 +144,14 @@ export function describe(r: PipelineResult): string[] {
           (blocked ? `, ${blocked} caught (review ${c.blocked.review}, verify ${c.blocked.verify}, policy ${c.blocked.policy})` : "") +
           (c.closed ? `, closed ${c.closed}` : "") +
           ` · $${m.cost_usd.toFixed(4)}` +
+          (m.reason_ms != null ? ` · reason ${(m.reason_ms / 1000).toFixed(1)}s` : "") +
+          (m.review_ms != null ? ` + review ${(m.review_ms / 1000).toFixed(1)}s` : "") +
           (m.latency_ms != null ? ` · ${(m.latency_ms / 1000).toFixed(1)}s since received` : ""),
       );
     }
   }
+  const n = (r.extract?.messages ?? 0) + r.resolve.assigned.length + r.resolve.inherited + (r.reasonReview?.reviewed ?? 0);
+  if (n && r.elapsedMs != null) out.push(`done in ${(r.elapsedMs / 1000).toFixed(1)}s (${PIPELINE_CONCURRENCY} at a time)`);
   const ins = r.insights;
   if (ins.opened || ins.resolved || ins.health.length) {
     out.push(

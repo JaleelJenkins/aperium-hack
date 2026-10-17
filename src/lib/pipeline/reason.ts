@@ -293,7 +293,7 @@ export const REASON_TOOL = {
     properties: {
       reasoning: {
         type: "string",
-        description: "A short plain-language note on how you read this email and its attachments and why you chose these items. Shown to the user.",
+        description: "One or two sentences on how you read this email and its attachments and why you chose these items. Shown to the user. Keep it short: every word adds latency.",
       },
       signals: {
         type: "array",
@@ -408,7 +408,7 @@ export function llmReasoner(llm: Llm, model: string): Reasoner {
         system: REASON_SYSTEM,
         content,
         tool: REASON_TOOL,
-        maxTokens: 4096,
+        maxTokens: 3000,
         hint: `reason:${bundle.message.id}`,
       });
       return { raw: r.input ?? {}, usage: r.usage, cost_usd: r.cost_usd ?? null, provider: r.provider ?? null };

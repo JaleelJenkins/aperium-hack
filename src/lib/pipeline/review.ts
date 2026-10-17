@@ -55,7 +55,7 @@ export const REVIEW_TOOL = {
     properties: {
       reasoning: {
         type: "string",
-        description: "A short plain-language note on what you checked in the full source and why each verdict came out as it did. Shown to the user.",
+        description: "One or two sentences on what you checked in the full source. Shown to the user. Per-item detail goes in each item's reason, not here.",
       },
       items: {
         type: "array",
@@ -131,7 +131,7 @@ export function llmReviewer(llm: Llm, model: string): Reviewer {
         { type: "text", text: `<source>\n${renderBundle(bundle)}\n</source>` },
         { type: "text", text: `<items_to_review>\n${JSON.stringify(listed, null, 2)}\n</items_to_review>\n\nReturn one verdict per tmp_id with submit_review.` },
       ];
-      const r = await llm.call<unknown>({ model, system: REVIEW_SYSTEM, content, tool: REVIEW_TOOL, maxTokens: 4096, hint: `review:${bundle.message.id}` });
+      const r = await llm.call<unknown>({ model, system: REVIEW_SYSTEM, content, tool: REVIEW_TOOL, maxTokens: 2500, hint: `review:${bundle.message.id}` });
       return { raw: r.input, usage: r.usage, cost_usd: r.cost_usd ?? null, provider: r.provider ?? null };
     },
   };
@@ -416,7 +416,7 @@ export interface ReasonReviewResult {
   reasoned: number;
   reviewed: number;
   failed: { message: string; stage: "reason" | "review"; error: string }[];
-  perMessage: { message: string; pair: string; counts: StoredCounts; cost_usd: number; latency_ms: number | null }[];
+  perMessage: { message: string; pair: string; counts: StoredCounts; cost_usd: number; latency_ms: number | null; reason_ms?: number | null; review_ms?: number | null }[];
 }
 
 const MAX_ATTEMPTS = 3;
@@ -444,6 +444,7 @@ interface RunRow {
   output_tokens: number;
   cost_usd: number;
   provider: string | null;
+  reason_ms: number | null;
 }
 
 function pickPair(db: DB, messageId: string, projectId: string, deps: ReasonReviewDeps): { id: string; reason: string; review: string | null; decision: RoutingDecision | null } {
@@ -539,7 +540,7 @@ export async function runReview(db: DB, deps: ReasonReviewDeps, opts: { limit?: 
   const rows = db
     .prepare(
       `SELECT r.id, r.message_id, r.pair_id, r.reason_profile_id, r.review_profile_id, r.reason_json, r.input_tokens, r.output_tokens,
-              r.cost_usd, r.provider
+              r.cost_usd, r.provider, r.reason_ms
          FROM messages m JOIN pipeline_runs r ON r.message_id = m.gmail_message_id AND r.stage = 'reasoned'
         WHERE m.status = 'reasoned'
           AND r.id = (SELECT id FROM pipeline_runs WHERE message_id = m.gmail_message_id AND stage = 'reasoned' ORDER BY at DESC LIMIT 1)
@@ -597,7 +598,7 @@ export async function runReview(db: DB, deps: ReasonReviewDeps, opts: { limit?: 
         db.prepare(`UPDATE messages SET status = 'reviewed', error = NULL WHERE gmail_message_id = ?`).run(run.message_id);
         db.prepare(`UPDATE projects SET last_contact_at = MAX(COALESCE(last_contact_at, ''), ?) WHERE id = ?`).run(received.received_at, bundle.project.id);
         audit(db, reviewerModel ?? run.reason_profile_id, "message.reviewed", `message:${run.message_id}`, { pair: run.pair_id, counts });
-        out.perMessage.push({ message: run.message_id, pair: run.pair_id ?? `${run.reason_profile_id}-${run.review_profile_id}`, counts, cost_usd: run.cost_usd + cost, latency_ms: latency });
+        out.perMessage.push({ message: run.message_id, pair: run.pair_id ?? `${run.reason_profile_id}-${run.review_profile_id}`, counts, cost_usd: run.cost_usd + cost, latency_ms: latency, reason_ms: run.reason_ms, review_ms: Date.now() - t0 });
       })();
       out.reviewed++;
     } catch (err) {

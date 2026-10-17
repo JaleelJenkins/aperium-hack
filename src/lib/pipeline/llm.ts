@@ -41,7 +41,10 @@ export interface Llm {
 
 export const DEFAULT_MODELS = {
   // Reading page text verbatim matters for evidence quotes, so extraction uses the stronger model.
+  // Only used for scanned PDFs with no text layer (most PDFs are read locally, no model call).
   extract: process.env.EXTRACT_MODEL || "claude-sonnet-5-5",
+  // Describing a screenshot or photo and copying its visible text: the fast model is enough.
+  extractImage: process.env.EXTRACT_IMAGE_MODEL || "claude-haiku-5-5",
   // Matching an email to one of a handful of project summaries is easy; keep it fast.
   resolve: process.env.RESOLVE_MODEL || "claude-haiku-5-5",
 };

@@ -8,7 +8,7 @@ const root = path.dirname(fileURLToPath(import.meta.url));
 
 const nextConfig: NextConfig = {
   outputFileTracingRoot: root,
-  serverExternalPackages: ["better-sqlite3", "googleapis", "html-to-text"],
+  serverExternalPackages: ["better-sqlite3", "googleapis", "html-to-text", "unpdf"],
   experimental: {
     staleTimes: {
       dynamic: 30,
