@@ -62,8 +62,8 @@ export default async function MessagePage({ params }: { params: Promise<{ id: st
 
   return (
     <>
-      <a href="/" className="muted">
-        ← Inbox
+      <a href="/" className="muted back">
+        ← Board
       </a>
       <h1 style={{ marginTop: 8 }}>{email.subject || "(no subject)"}</h1>
       <dl className="meta">
