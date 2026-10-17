@@ -7,6 +7,7 @@ import { ConnectionBanners, ConnectionControls, InboxStatus } from "./components
 import { CaughtDrawer, InspectorDrawer } from "./components/Drawer";
 import { Icon } from "./components/Icon";
 import { AutoRefresh } from "./components/LiveControls";
+import { TuneDrawer } from "./components/TuneDrawer";
 
 export const dynamic = "force-dynamic";
 
@@ -103,6 +104,7 @@ export default async function BoardPage({
 
       {inspection && <InspectorDrawer item={inspection} hrefFor={hrefFor} />}
       {ref?.type === "caught" && <CaughtDrawer claims={caughtClaims(db)} hrefFor={hrefFor} />}
+      {open?.startsWith("tune:") && <TuneDrawer db={db} projectId={open.slice("tune:".length)} closeHref={hrefFor(null)} />}
     </div>
   );
 }

@@ -60,7 +60,7 @@ const OPUS = "claude-opus";
 
 function thread(id: string, projectId: string | null, subject: string, confidence: number | null) {
   db.prepare(
-    `INSERT INTO threads (gmail_thread_id, account, subject, project_id, assignment_confidence) VALUES (?, 'demo@local', ?, ?, ?)`,
+    `INSERT INTO threads (gmail_thread_id, account, subject, project_id, assignment_confidence) VALUES (?, 'pulse.demo@gmail.com', ?, ?, ?)`,
   ).run(id, subject, projectId, confidence);
 }
 
@@ -76,7 +76,7 @@ function message(
   db.prepare(
     `INSERT INTO messages (gmail_message_id, thread_id, account, sender_name, sender_email, subject, sent_at, received_at,
                            snippet, body_source, raw_text, clean_text, status)
-     VALUES (?, ?, 'demo@local', ?, ?, ?, ?, ?, ?, 'text/plain', ?, ?, ?)`,
+     VALUES (?, ?, 'pulse.demo@gmail.com', ?, ?, ?, ?, ?, ?, 'text/plain', ?, ?, ?)`,
   ).run(id, threadId, from[0], from[1], subject, at(-hoursAgo), at(-hoursAgo), text.slice(0, 120), text, text, status);
 }
 

@@ -2,7 +2,10 @@ import Link from "next/link";
 import type { Board, BoardCard, CardKind, ClientGroup, ColumnId, Health, Lane } from "@/lib/board";
 import { COLUMNS } from "@/lib/board";
 import { ago, dueText, hue, initials, modelShort } from "../format";
+import { POLICY_LABEL } from "@/lib/router/types";
 import { Icon, type IconName } from "./Icon";
+import { PolicyPill } from "./PolicyPill";
+import { RouteTraceBadge } from "./RouteTraceBadge";
 
 export const KIND_LABEL: Record<CardKind, string> = {
   email: "Email",
@@ -111,6 +114,7 @@ function Card({ card, triage, hrefFor, selected }: { card: BoardCard; triage: bo
           </span>
         )}
         <Custody producer={card.producedBy} review={card.review} />
+        {card.route && <RouteTraceBadge route={card.route} />}
         {stage && (
           <span className={`meta-item ${waiting ? "waiting" : "processing"}`}>
             {!waiting && <span className="pulse" />}
@@ -126,7 +130,7 @@ function Card({ card, triage, hrefFor, selected }: { card: BoardCard; triage: bo
   );
 }
 
-function LaneHeader({ lane, triage }: { lane: Lane; triage: boolean }) {
+function LaneHeader({ lane, triage, hrefFor }: { lane: Lane; triage: boolean; hrefFor: HrefFor }) {
   const s = lane.stats;
   return (
     <summary className="lane-head">
@@ -134,6 +138,9 @@ function LaneHeader({ lane, triage }: { lane: Lane; triage: boolean }) {
       {triage ? <Icon name="inbox" size={15} /> : null}
       <span className="lane-name">{lane.name}</span>
       {!triage && <HealthPill health={lane.health} />}
+      {lane.routing && (
+        <PolicyPill href={hrefFor(`tune:${lane.id}`)} label={POLICY_LABEL[lane.routing.policy]} inherited={lane.routing.inherited} />
+      )}
       <span className="lane-stats">
         {triage ? (
           <span>{s.open} unfiled</span>
@@ -161,7 +168,7 @@ function LaneHeader({ lane, triage }: { lane: Lane; triage: boolean }) {
 function LaneRow({ lane, triage = false, hrefFor, selected }: { lane: Lane; triage?: boolean; hrefFor: HrefFor; selected: string | null }) {
   return (
     <details className={`lane${triage ? " triage" : ""}`} open id={`lane-${lane.id}`}>
-      <LaneHeader lane={lane} triage={triage} />
+      <LaneHeader lane={lane} triage={triage} hrefFor={hrefFor} />
       {!triage && lane.summary && <p className="lane-summary">{lane.summary}</p>}
       <div className="lane-grid">
         {COLUMNS.map((col) => {

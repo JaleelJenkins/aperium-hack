@@ -3,6 +3,8 @@ import path from "node:path";
 import { z } from "zod";
 import { audit, type DB } from "./db";
 
+const ROUTING_POLICIES = ["pareto_auto", "complexity_escalation", "strict_trust", "low_latency", "pinned"] as const;
+
 const SeedFile = z.object({
   clients: z.array(
     z.object({
@@ -12,7 +14,15 @@ const SeedFile = z.object({
       contacts: z.array(z.object({ email: z.string(), name: z.string().optional() })),
     }),
   ),
-  projects: z.array(z.object({ id: z.string(), client_id: z.string(), name: z.string(), summary: z.string().default("") })),
+  projects: z.array(
+    z.object({
+      id: z.string(),
+      client_id: z.string(),
+      name: z.string(),
+      summary: z.string().default(""),
+      routing_policy: z.enum(ROUTING_POLICIES).nullable().default(null),
+    }),
+  ),
   model_profiles: z.array(
     z.object({
       id: z.string(),
@@ -25,6 +35,7 @@ const SeedFile = z.object({
     }),
   ),
   default_model_prefs: z.object({ reason: z.string(), review: z.string() }),
+  default_routing_policy: z.enum(ROUTING_POLICIES).default("pareto_auto"),
 });
 export type SeedFile = z.infer<typeof SeedFile>;
 
@@ -58,11 +69,14 @@ export function applySeed(db: DB, seed: SeedFile): string[] {
       }
     }
 
+    // routing_policy only fills an empty policy; it never overrides a choice made in the UI.
     const upProject = db.prepare(
-      `INSERT INTO projects (id, client_id, name, summary) VALUES (?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET client_id = excluded.client_id, name = excluded.name`,
+      `INSERT INTO projects (id, client_id, name, summary, routing_policy) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET client_id = excluded.client_id, name = excluded.name,
+         routing_policy = COALESCE(projects.routing_policy, excluded.routing_policy)`,
     );
-    for (const p of seed.projects) upProject.run(p.id, p.client_id, p.name, p.summary);
+    for (const p of seed.projects) upProject.run(p.id, p.client_id, p.name, p.summary, p.routing_policy);
+    db.prepare(`INSERT OR IGNORE INTO app_settings (key, value) VALUES ('router.default_policy', ?)`).run(seed.default_routing_policy);
 
     const upProfile = db.prepare(
       `INSERT INTO model_profiles (id, provider, model_name, label, stages_json, cost_in_per_mtok, cost_out_per_mtok)
@@ -98,7 +112,7 @@ export function applySeed(db: DB, seed: SeedFile): string[] {
 export function resetToSeed(db: DB, seed: SeedFile, opts: { disconnect?: boolean } = {}): string[] {
   const seededProjects = seed.projects.map((p) => p.id);
   db.transaction(() => {
-    db.exec(`DELETE FROM pipeline_runs; DELETE FROM model_reviews; DELETE FROM actions; DELETE FROM insights; DELETE FROM signals;
+    db.exec(`DELETE FROM route_decisions; DELETE FROM route_runs; DELETE FROM pipeline_runs; DELETE FROM model_reviews; DELETE FROM actions; DELETE FROM insights; DELETE FROM signals;
              DELETE FROM attachments; DELETE FROM messages; DELETE FROM threads;
              DELETE FROM eval_runs; DELETE FROM audit_events;`);
     db.prepare(`DELETE FROM projects WHERE id NOT IN (${seededProjects.map(() => "?").join(",")})`).run(...seededProjects);
@@ -107,7 +121,8 @@ export function resetToSeed(db: DB, seed: SeedFile, opts: { disconnect?: boolean
     else db.exec(`UPDATE gmail_accounts SET history_id = NULL, last_synced_at = NULL, last_error = NULL;`);
   })();
   // Restores seeded summaries too (the upsert above leaves summaries alone).
-  const restore = db.prepare(`UPDATE projects SET summary = ? WHERE id = ?`);
-  for (const p of seed.projects) restore.run(p.summary, p.id);
+  const restore = db.prepare(`UPDATE projects SET summary = ?, routing_policy = ?, pinned_pair_id = NULL WHERE id = ?`);
+  for (const p of seed.projects) restore.run(p.summary, p.routing_policy, p.id);
+  db.prepare(`DELETE FROM app_settings WHERE key LIKE 'router.%'`).run();
   return applySeed(db, seed);
 }

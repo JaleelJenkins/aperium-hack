@@ -65,6 +65,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 Caught by review
                 <span className={`side-count${caught ? " hot" : ""}`}>{caught}</span>
               </NavLink>
+              <NavLink href="/scoreboard">
+                <Icon name="gauge" size={15} />
+                Model scoreboard
+              </NavLink>
               <NavLink href="/inbox">
                 <Icon name="mail" size={15} />
                 All mail

@@ -33,7 +33,7 @@ describe("DB wrapper over node:sqlite", () => {
 
   it("migration 002: blocked reviews need no target row; review provenance + pipeline_runs exist", () => {
     const db = openDb(":memory:");
-    expect((db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(2);
+    expect((db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBeGreaterThanOrEqual(2);
 
     db.prepare(
       `INSERT INTO model_reviews (id, target_type, target_id, produced_by_model, reviewer_model, blocked_by, verdict, notes, claim_json, conflicting_evidence_json)
