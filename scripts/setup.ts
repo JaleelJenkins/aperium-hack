@@ -40,7 +40,8 @@ console.log(`    → ${config.dbPath}`);
 
 const todo: string[] = [];
 for (const k of ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"]) if (!process.env[k]) todo.push(`${k} in ${ENV} (see README → Google Cloud)`);
-if (!process.env.ANTHROPIC_API_KEY) todo.push(`ANTHROPIC_API_KEY in ${ENV} (needed for Extract/Reason/Review, not for ingest)`);
+if (!process.env.ANTHROPIC_API_KEY && !process.env.OPENROUTER_API_KEY)
+  todo.push(`ANTHROPIC_API_KEY or OPENROUTER_API_KEY in ${ENV} (needed for Extract/Reason/Review, not for ingest)`);
 todo.push(...warnings.map((w) => `${w} in seed/seed.json, then npm run seed`));
 
 if (todo.length) {

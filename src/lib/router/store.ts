@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import { audit, type DB } from "../db";
 import { finalizePairs, SEED_PAIR_ROWS, type SeedRow } from "./leaderboard";
 import { inspectEmailPayloadForRouting, selectOptimalModelPair } from "./pairRouter";
+import { hasModelKey, modelAvailable } from "../pipeline/models";
 import type { ModelId, ModelPairBenchmark, RoutingContext, RoutingDecision, RoutingPolicyMode, TrapId, TrapResult } from "./types";
 import { POLICY_MODES, TRAP_IDS } from "./types";
 
@@ -154,7 +155,14 @@ export function getLeaderboard(db: DB): ModelPairBenchmark[] {
   const measured = measuredRows(db);
   const rows = SEED_PAIR_ROWS.map((r) => measured.get(r.id) ?? r);
   for (const [id, r] of measured) if (!SEED_PAIR_ROWS.some((s) => s.id === id)) rows.push(r);
-  return finalizePairs(rows);
+  const pairs = finalizePairs(rows);
+  // With a model key configured, "available" means a provider can actually serve both
+  // models (e.g. gemini-flash once OPENROUTER_MODEL_GEMINI_FLASH is set). Without one,
+  // keep the catalog view so the scoreboard and dry-run still work offline.
+  if (hasModelKey()) {
+    for (const p of pairs) p.available = [p.reasonModel, p.reviewModel].every((m) => m === null || modelAvailable(m));
+  }
+  return pairs;
 }
 
 // ---------------------------------------------------------------- routing a stored message
