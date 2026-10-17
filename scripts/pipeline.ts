@@ -9,7 +9,8 @@ loadEnv({ path: [".env.local", ".env"], quiet: true });
 
 import { getDb } from "../src/lib/db";
 import { hasApiKey, providerSummary } from "../src/lib/pipeline/llm";
-import { defaultDeps, describe, runPipeline } from "../src/lib/pipeline/run";
+import { ensureSeeded, processWaiting } from "../src/lib/cycle";
+import { defaultDeps, describe } from "../src/lib/pipeline/run";
 
 const deps = defaultDeps();
 console.log(
@@ -18,8 +19,15 @@ console.log(
     : "No ANTHROPIC_API_KEY or OPENROUTER_API_KEY in .env.local: skipping Extract, Reason and Review; Resolve uses word overlap with project summaries.",
 );
 const db = getDb();
-const r = await runPipeline(db, deps);
-const lines = describe(r);
-console.log(lines.length ? lines.join("\n") : "Nothing waiting.");
+if (ensureSeeded(db)) console.log("Empty database: loaded seed/seed.json first.");
+const r = await processWaiting(db, "cli", deps);
+if (!r.ran) {
+  console.log("The worker or Sync now is already running the pipeline. Try again in a minute.");
+} else {
+  const lines = describe(r.pipeline);
+  const x = r.executor;
+  if (x.drafts || x.tasks || x.failed.length) lines.push(`executor: ${x.drafts} draft(s), ${x.tasks} task(s), ${x.failed.length} failed`);
+  console.log(lines.length ? lines.join("\n") : "Nothing waiting.");
+}
 const counts = db.prepare(`SELECT status, COUNT(*) AS n FROM messages GROUP BY status ORDER BY status`).all() as { status: string; n: number }[];
 console.log(`Messages by status: ${counts.map((c) => `${c.status} ${c.n}`).join(", ") || "none yet"}`);

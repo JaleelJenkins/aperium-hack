@@ -1,5 +1,6 @@
 /**
- * Ingest worker: polls every connected Gmail inbox and stores new mail.
+ * Worker: polls every connected Gmail inbox and runs the full pipeline on what arrives
+ * (Extract -> Resolve -> Reason -> Review -> Executor), every POLL_INTERVAL_MS.
  *
  *   npm run worker        # loop every POLL_INTERVAL_MS
  *   npm run worker:once   # one pass, then exit
@@ -9,12 +10,10 @@ loadEnv({ path: [".env.local", ".env"], quiet: true });
 
 import { config } from "../src/lib/config";
 import { getDb } from "../src/lib/db";
-import { draftApiFor, listAccounts } from "../src/lib/gmail/client";
-import { syncAll } from "../src/lib/ingest/sync";
-import { applySeed, readSeed } from "../src/lib/seed";
+import { runCycle } from "../src/lib/cycle";
+import { listAccounts } from "../src/lib/gmail/client";
 import { hasApiKey, providerSummary } from "../src/lib/pipeline/llm";
-import { runExecutor } from "../src/lib/pipeline/execute";
-import { defaultDeps, describe, runPipeline } from "../src/lib/pipeline/run";
+import { defaultDeps, describe } from "../src/lib/pipeline/run";
 
 const pipelineDeps = defaultDeps();
 
@@ -25,35 +24,32 @@ process.on("SIGTERM", () => (stopping = true));
 
 async function tick(): Promise<void> {
   const db = getDb();
-  if (listAccounts(db).length === 0) {
-    log("no Gmail account connected yet — open the dashboard and click Connect Gmail");
-    return;
+  if (listAccounts(db).length === 0) log("no Gmail account connected yet — open the dashboard and click Connect Gmail");
+  // Seed (empty DB) -> sync -> Extract -> Resolve -> Reason -> Review -> Executor, under the shared lease.
+  const r = await runCycle(db, "worker", pipelineDeps);
+  if (r.seeded) {
+    for (const w of r.seeded) log(`seed: ${w}`);
+    log("loaded seed/seed.json (clients, projects, model profiles)");
   }
-  for (const r of await syncAll(db)) {
-    if ("error" in r) {
-      log(`${r.account}: ERROR ${r.error}`);
+  for (const s of r.sync) {
+    if ("error" in s) {
+      log(`${s.account}: ERROR ${s.error}`);
       continue;
     }
-    const parts = [`${r.mode}`, `+${r.newEmailIds.length} new`];
-    if (r.existing) parts.push(`${r.existing} already stored`);
-    if (r.skipped) parts.push(`${r.skipped} skipped`);
-    if (r.failed.length) parts.push(`${r.failed.length} failed (${r.failed.map((f) => f.error).join("; ")})`);
-    if (r.newEmailIds.length || r.failed.length || r.mode === "bootstrap" || once) log(`${r.account}: ${parts.join(", ")}`);
+    const parts = [`${s.mode}`, `+${s.newEmailIds.length} new`];
+    if (s.existing) parts.push(`${s.existing} already stored`);
+    if (s.skipped) parts.push(`${s.skipped} skipped`);
+    if (s.failed.length) parts.push(`${s.failed.length} failed (${s.failed.map((f) => f.error).join("; ")})`);
+    if (s.newEmailIds.length || s.failed.length || s.mode === "bootstrap" || once) log(`${s.account}: ${parts.join(", ")}`);
   }
-  // Extract, Resolve, Reason and Review whatever is waiting (new mail, or a backlog after adding an API key).
-  try {
-    for (const line of describe(await runPipeline(db, pipelineDeps))) log(line);
-  } catch (err) {
-    log(`pipeline failed: ${err instanceof Error ? err.message : String(err)}`);
+  if (!r.outcome.ran) {
+    if (once) log("pipeline: another process (Sync now) is running it; skipped");
+    return;
   }
-  // Approved actions: Gmail drafts (drafts.create, never send) and tasks onto the board.
-  try {
-    const x = await runExecutor(db, draftApiFor(db));
-    if (x.drafts || x.tasks || x.failed.length) {
-      log(`executor: ${x.drafts} draft(s) created, ${x.tasks} task(s) added` + (x.failed.length ? `, ${x.failed.length} failed (${x.failed.map((f) => f.error).join("; ")})` : ""));
-    }
-  } catch (err) {
-    log(`executor failed: ${err instanceof Error ? err.message : String(err)}`);
+  for (const line of describe(r.outcome.pipeline)) log(line);
+  const x = r.outcome.executor;
+  if (x.drafts || x.tasks || x.failed.length) {
+    log(`executor: ${x.drafts} draft(s) created, ${x.tasks} task(s) added` + (x.failed.length ? `, ${x.failed.length} failed (${x.failed.map((f) => f.error).join("; ")})` : ""));
   }
 }
 
@@ -68,11 +64,6 @@ async function main(): Promise<void> {
       ? `pipeline (${providerSummary()}): extract with ${pipelineDeps.extractor!.model}, resolve with ${pipelineDeps.matcher.model}, reason/review with the routed pair`
       : "pipeline: no ANTHROPIC_API_KEY or OPENROUTER_API_KEY, so attachments are not extracted, projects are matched by word overlap, and Reason/Review are skipped",
   );
-  const db = getDb();
-  if (!(db.prepare(`SELECT 1 FROM clients LIMIT 1`).get())) {
-    for (const w of applySeed(db, readSeed())) log(`seed: ${w}`);
-    log("loaded seed/seed.json (clients, projects, model profiles)");
-  }
   do {
     try {
       await tick();

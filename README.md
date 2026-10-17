@@ -38,7 +38,7 @@ Each stage picks up `messages.status` from the previous one: `ingested → extra
 | Area | Requirement | Pri | Status | Where |
 |---|---|---|---|---|
 | **F1 Connect & ingest** | Google OAuth for one inbox, tokens encrypted at rest | P0 | ✅ | `src/app/api/auth/google/*`, `src/lib/crypto.ts` |
-| | Poll `users.history.list` every 10s + "Sync now" | P0 | ✅ | `worker/ingest.ts`, `src/lib/ingest/sync.ts` |
+| | Poll `users.history.list` every 10s + "Sync now"; both run the full pipeline (Extract → Resolve → Reason → Review → Executor) under a shared lease | P0 | ✅ | `src/lib/cycle.ts`, `worker/ingest.ts`, `src/app/api/ingest/sync` |
 | | Store raw message, strip quotes/signatures, download attachments | P0 | ✅ | `src/lib/ingest/{parse,clean,store}.ts` |
 | | Disconnect wipes tokens and stored mail | P0 | ✅ | `src/app/api/auth/google/disconnect` |
 | | Gmail push (`users.watch` + Pub/Sub) | P2 | — | |

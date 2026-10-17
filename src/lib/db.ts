@@ -468,9 +468,22 @@ function migrate(db: DB): void {
 
 const g = globalThis as unknown as { __reasoningIntelligenceDb?: DB };
 
+/**
+ * The DB file was renamed from client-pulse.db. If only the old file exists, move it
+ * (with its WAL files) so an existing inbox, projects and decisions carry over.
+ */
+function adoptLegacyDb(dbPath: string): void {
+  const legacy = path.join(path.dirname(dbPath), "client-pulse.db");
+  if (fs.existsSync(dbPath) || !fs.existsSync(legacy)) return;
+  for (const ext of ["", "-wal", "-shm"]) if (fs.existsSync(legacy + ext)) fs.renameSync(legacy + ext, dbPath + ext);
+}
+
 /** Process-wide connection (survives Next.js dev hot reloads). */
 export function getDb(): DB {
-  if (!g.__reasoningIntelligenceDb) g.__reasoningIntelligenceDb = openDb(config.dbPath);
+  if (!g.__reasoningIntelligenceDb) {
+    adoptLegacyDb(config.dbPath);
+    g.__reasoningIntelligenceDb = openDb(config.dbPath);
+  }
   return g.__reasoningIntelligenceDb;
 }
 

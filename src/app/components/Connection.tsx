@@ -1,4 +1,5 @@
 import { cache } from "react";
+import { pipelineBusy } from "@/lib/cycle";
 import { getDb } from "@/lib/db";
 import { listAccounts } from "@/lib/gmail/client";
 import { ago } from "../format";
@@ -18,7 +19,7 @@ export function ConnectionBanners({ error, connected, disconnected }: Flash) {
     <>
       {error && <div className="banner error">Gmail connection failed: {error}</div>}
       {disconnected && <div className="banner ok">Disconnected. Tokens and stored mail were wiped.</div>}
-      {connected && <div className="banner ok">Connected {connected}. The worker will pull recent inbox mail on its next poll.</div>}
+      {connected && <div className="banner ok">Connected {connected}. Click Sync now to pull recent mail and run the pipeline (the worker also does this every poll).</div>}
     </>
   );
 }
@@ -27,6 +28,9 @@ export function ConnectionBanners({ error, connected, disconnected }: Flash) {
 export function InboxStatus() {
   const accounts = getAccounts();
   if (accounts.length === 0) return <span className="muted">No inbox connected</span>;
+  const db = getDb();
+  const waiting = (db.prepare(`SELECT COUNT(*) AS n FROM messages WHERE status IN ('ingested', 'extracted', 'resolved', 'reasoned')`).get() as { n: number }).n;
+  const busy = pipelineBusy(db);
   return (
     <span className="inbox-status">
       {accounts.map((a) => (
@@ -37,6 +41,18 @@ export function InboxStatus() {
           {a.last_error && <span className="pill bad">{a.last_error}</span>}
         </span>
       ))}
+      {busy ? (
+        <span className="meta-item processing" title="Extract, Resolve, Reason and Review are running">
+          <span className="pulse" />
+          Processing {waiting} email{waiting === 1 ? "" : "s"}
+        </span>
+      ) : (
+        waiting > 0 && (
+          <span className="muted" title="Click Sync now, or start the worker (npm run worker), to process them">
+            · {waiting} waiting for the pipeline
+          </span>
+        )
+      )}
     </span>
   );
 }
