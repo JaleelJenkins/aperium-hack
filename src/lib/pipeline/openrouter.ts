@@ -42,10 +42,10 @@ export type FetchLike = (url: string, init: { method: string; headers: Record<st
   text(): Promise<string>;
 }>;
 
-/** Per-request model timeout. LLM_TIMEOUT_MS overrides; default 90 s. */
+/** Per-request model timeout. LLM_TIMEOUT_MS overrides; default 45 s. */
 export function llmTimeoutMs(): number {
   const n = Number(process.env.LLM_TIMEOUT_MS);
-  return Number.isFinite(n) && n > 0 ? n : 90_000;
+  return Number.isFinite(n) && n > 0 ? n : 45_000; // normal calls take 5-20s; a hung one fails fast and is retried
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -53,7 +53,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export async function openRouterCall<T>(
   model: string,
   req: ToolCall<T>,
-  opts: { apiKey?: string; fetch?: FetchLike; maxRetries?: number } = {},
+  opts: { apiKey?: string; fetch?: FetchLike; maxRetries?: number; onRetry?: (attempt: number, reason: string, waitMs: number) => void } = {},
 ): Promise<LlmResult<T> & { cost_usd: number | null; served_model: string }> {
   const apiKey = opts.apiKey ?? process.env.OPENROUTER_API_KEY?.trim();
   if (!apiKey) throw new Error("OPENROUTER_API_KEY is not set");
@@ -86,11 +86,15 @@ export async function openRouterCall<T>(
       text = await res.text();
     } catch (err) {
       const timedOut = err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
-      if (timedOut && attempt < retries) continue;
+      if (timedOut && attempt < retries) {
+        opts.onRetry?.(attempt + 1, `no response after ${llmTimeoutMs() / 1000}s`, 0);
+        continue;
+      }
       throw timedOut ? new Error(`OpenRouter ${model}: no response after ${llmTimeoutMs() / 1000}s`) : err;
     }
     if (!res.ok) {
       if ((res.status === 429 || res.status >= 500) && attempt < retries) {
+        opts.onRetry?.(attempt + 1, res.status === 429 ? "429 rate limited" : `HTTP ${res.status}`, 500 * 2 ** attempt);
         await sleep(500 * 2 ** attempt);
         continue;
       }

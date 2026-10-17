@@ -410,6 +410,7 @@ export function llmReasoner(llm: Llm, model: string): Reasoner {
         tool: REASON_TOOL,
         maxTokens: 3000,
         hint: `reason:${bundle.message.id}`,
+        label: bundle.message.subject ?? undefined,
       });
       return { raw: r.input ?? {}, usage: r.usage, cost_usd: r.cost_usd ?? null, provider: r.provider ?? null };
     },

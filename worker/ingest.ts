@@ -13,7 +13,7 @@ import { getDb } from "../src/lib/db";
 import { runCycle } from "../src/lib/cycle";
 import { listAccounts } from "../src/lib/gmail/client";
 import { hasApiKey, providerSummary } from "../src/lib/pipeline/llm";
-import { defaultDeps, describe } from "../src/lib/pipeline/run";
+import { defaultDeps } from "../src/lib/pipeline/run";
 
 const pipelineDeps = defaultDeps();
 
@@ -46,7 +46,6 @@ async function tick(): Promise<void> {
     if (once) log("pipeline: another process (Sync now) is running it; skipped");
     return;
   }
-  for (const line of describe(r.outcome.pipeline)) log(line);
   const x = r.outcome.executor;
   if (x.drafts || x.tasks || x.failed.length) {
     log(`executor: ${x.drafts} draft(s) created, ${x.tasks} task(s) added` + (x.failed.length ? `, ${x.failed.length} failed (${x.failed.map((f) => f.error).join("; ")})` : ""));

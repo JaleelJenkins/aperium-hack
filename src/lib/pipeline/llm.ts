@@ -20,8 +20,10 @@ export interface ToolCall<T> {
   content: ContentBlock[];
   tool: { name: string; description: string; input_schema: Anthropic.Messages.Tool.InputSchema };
   maxTokens?: number;
-  /** Only used by fakes in tests, to tell calls apart. */
+  /** Tells calls apart: "reason:<message id>", "review:<id>", "extract-image", "resolve"... */
   hint?: string;
+  /** Human label for logs (email subject, attachment name). */
+  label?: string;
   /** Type witness; not sent. */
   _out?: T;
 }
@@ -63,19 +65,54 @@ export function providerSummary(): string {
   return parts.length ? `${parts.join(" + ")}${mode ? ` (LLM_PROVIDER=${mode})` : ""}` : "no model provider";
 }
 
-let anthropic: Anthropic | null = null;
+// ------------------------------------------------------------- call tracing
 
-async function anthropicCall<T>(model: string, req: ToolCall<T>): Promise<LlmResult<T>> {
-  // Bounded per request (default 90 s, then up to 2 retries) so a hung call can't stall the pipeline lease.
-  anthropic ??= new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 2, timeout: llmTimeoutMs() });
-  const res = await anthropic.messages.create({
-    model,
-    max_tokens: req.maxTokens ?? 4096,
-    system: withToolInstruction(req.system, req.tool.name),
-    tools: [req.tool],
-    tool_choice: { type: "auto" },
-    messages: [{ role: "user", content: req.content }],
-  });
+/** Watches every model call (start, retries, end): the terminal log and `npm run pipeline:watch`. */
+export interface CallObserver {
+  start(info: { model: string; provider: Provider; hint?: string; label?: string }): string;
+  retry(token: string, attempt: number, reason: string, waitMs: number): void;
+  end(token: string, r: { ok: boolean; ms: number; error?: string; usage?: { input_tokens: number; output_tokens: number } }): void;
+}
+
+let observer: CallObserver | null = null;
+export function setCallObserver(o: CallObserver | null): void {
+  observer = o;
+}
+
+let anthropic: Anthropic | null = null;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const MAX_RETRIES = 2;
+
+async function anthropicCall<T>(model: string, req: ToolCall<T>, onRetry?: (attempt: number, reason: string, waitMs: number) => void): Promise<LlmResult<T>> {
+  // Bounded per request (default 45 s). Retries are ours, not the SDK's, so each one is logged.
+  anthropic ??= new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 0, timeout: llmTimeoutMs() });
+  let res: Anthropic.Messages.Message;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      res = await anthropic.messages.create({
+        model,
+        max_tokens: req.maxTokens ?? 4096,
+        system: withToolInstruction(req.system, req.tool.name),
+        tools: [req.tool],
+        tool_choice: { type: "auto" },
+        messages: [{ role: "user", content: req.content }],
+      });
+      break;
+    } catch (err) {
+      const status = (err as { status?: number }).status;
+      const timedOut = err instanceof Anthropic.APIConnectionTimeoutError;
+      const retryable = timedOut || status === 429 || status === 529 || (status !== undefined && status >= 500) || err instanceof Anthropic.APIConnectionError;
+      if (!retryable || attempt >= MAX_RETRIES) {
+        if (timedOut) throw new Error(`${model}: no response after ${llmTimeoutMs() / 1000}s (${attempt + 1} attempts)`);
+        throw err;
+      }
+      const after = Number((err as { headers?: Record<string, string> }).headers?.["retry-after"]);
+      const waitMs = Number.isFinite(after) && after > 0 ? Math.min(after * 1000, 30_000) : 1000 * 2 ** attempt;
+      const reason = timedOut ? `no response after ${llmTimeoutMs() / 1000}s` : status === 429 ? "429 rate limited" : status === 529 ? "529 overloaded" : `HTTP ${status ?? "connection error"}`;
+      onRetry?.(attempt + 1, reason, timedOut ? 0 : waitMs);
+      if (!timedOut) await sleep(waitMs);
+    }
+  }
   const block = res.content.find((b) => b.type === "tool_use");
   if (!block || block.type !== "tool_use") throw new Error(`${model} returned no ${req.tool.name} call`);
   return {
@@ -95,12 +132,24 @@ export function pipelineLlm(): Llm {
             (req.model === "gemini-flash" ? " and OPENROUTER_MODEL_GEMINI_FLASH" : ""),
         );
       }
-      if (route.provider === "openrouter") {
-        const r = await openRouterCall(route.model, req);
-        return { ...r, cost_usd: r.cost_usd ?? estimateCost(route.spec, r.usage), provider: "openrouter" };
+      const t0 = Date.now();
+      const token = observer?.start({ model: route.model, provider: route.provider, hint: req.hint, label: req.label });
+      const onRetry = token ? (attempt: number, reason: string, waitMs: number) => observer?.retry(token, attempt, reason, waitMs) : undefined;
+      try {
+        let out: LlmResult<T>;
+        if (route.provider === "openrouter") {
+          const r = await openRouterCall(route.model, req, { onRetry });
+          out = { ...r, cost_usd: r.cost_usd ?? estimateCost(route.spec, r.usage), provider: "openrouter" };
+        } else {
+          const r = await anthropicCall(route.model, req, onRetry);
+          out = { ...r, cost_usd: estimateCost(route.spec, r.usage), provider: "anthropic" };
+        }
+        if (token) observer?.end(token, { ok: true, ms: Date.now() - t0, usage: out.usage });
+        return out;
+      } catch (err) {
+        if (token) observer?.end(token, { ok: false, ms: Date.now() - t0, error: err instanceof Error ? err.message : String(err) });
+        throw err;
       }
-      const r = await anthropicCall(route.model, req);
-      return { ...r, cost_usd: estimateCost(route.spec, r.usage), provider: "anthropic" };
     },
   };
 }

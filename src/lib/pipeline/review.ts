@@ -131,7 +131,7 @@ export function llmReviewer(llm: Llm, model: string): Reviewer {
         { type: "text", text: `<source>\n${renderBundle(bundle)}\n</source>` },
         { type: "text", text: `<items_to_review>\n${JSON.stringify(listed, null, 2)}\n</items_to_review>\n\nReturn one verdict per tmp_id with submit_review.` },
       ];
-      const r = await llm.call<unknown>({ model, system: REVIEW_SYSTEM, content, tool: REVIEW_TOOL, maxTokens: 2500, hint: `review:${bundle.message.id}` });
+      const r = await llm.call<unknown>({ model, system: REVIEW_SYSTEM, content, tool: REVIEW_TOOL, maxTokens: 2500, hint: `review:${bundle.message.id}`, label: bundle.message.subject ?? undefined });
       return { raw: r.input, usage: r.usage, cost_usd: r.cost_usd ?? null, provider: r.provider ?? null };
     },
   };

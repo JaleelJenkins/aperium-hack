@@ -2,7 +2,6 @@ import { after, NextResponse } from "next/server";
 import { ensureSeeded, pipelineBusy, processWaiting } from "@/lib/cycle";
 import { getDb } from "@/lib/db";
 import { syncAll } from "@/lib/ingest/sync";
-import { describe } from "@/lib/pipeline/run";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,8 +23,8 @@ export async function POST() {
   if (pipeline === "started") {
     after(async () => {
       try {
-        const r = await processWaiting(db, "web");
-        if (r.ran) for (const line of describe(r.pipeline)) console.log(`[sync now] ${line}`);
+        // Progress is logged per call and per email by the tracer (lib/llm-trace.ts).
+        await processWaiting(db, "web");
       } catch (err) {
         console.error(`[sync now] pipeline failed: ${err instanceof Error ? err.message : String(err)}`);
       }

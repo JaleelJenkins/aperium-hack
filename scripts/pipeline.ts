@@ -10,7 +10,7 @@ loadEnv({ path: [".env.local", ".env"], quiet: true });
 import { getDb } from "../src/lib/db";
 import { hasApiKey, providerSummary } from "../src/lib/pipeline/llm";
 import { ensureSeeded, processWaiting } from "../src/lib/cycle";
-import { defaultDeps, describe } from "../src/lib/pipeline/run";
+import { defaultDeps } from "../src/lib/pipeline/run";
 
 const deps = defaultDeps();
 console.log(
@@ -24,10 +24,10 @@ const r = await processWaiting(db, "cli", deps);
 if (!r.ran) {
   console.log("The worker or Sync now is already running the pipeline. Try again in a minute.");
 } else {
-  const lines = describe(r.pipeline);
+  // Per-call and per-email progress was logged live as it ran.
   const x = r.executor;
-  if (x.drafts || x.tasks || x.failed.length) lines.push(`executor: ${x.drafts} draft(s), ${x.tasks} task(s), ${x.failed.length} failed`);
-  console.log(lines.length ? lines.join("\n") : "Nothing waiting.");
+  if (x.drafts || x.tasks || x.failed.length) console.log(`executor: ${x.drafts} draft(s), ${x.tasks} task(s), ${x.failed.length} failed`);
+  if (!r.pipeline.elapsedMs || !(r.pipeline.reasonReview?.reviewed || r.pipeline.resolve.assigned.length)) console.log("Nothing waiting.");
 }
 const counts = db.prepare(`SELECT status, COUNT(*) AS n FROM messages GROUP BY status ORDER BY status`).all() as { status: string; n: number }[];
 console.log(`Messages by status: ${counts.map((c) => `${c.status} ${c.n}`).join(", ") || "none yet"}`);

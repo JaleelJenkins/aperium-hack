@@ -502,6 +502,25 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX pipeline_log_batch_idx ON pipeline_log(batch_id, id);
   `,
+
+  /* 014: every model call, in flight and finished, so a stuck call is visible (npm run pipeline:watch) */ `
+  CREATE TABLE llm_calls (
+    id          TEXT PRIMARY KEY,
+    source      TEXT,                 -- web | worker | cli
+    stage       TEXT NOT NULL,        -- extract | resolve | reason | review | other
+    message_id  TEXT,
+    label       TEXT,                 -- email subject or attachment name
+    model       TEXT NOT NULL,
+    provider    TEXT,
+    started_at  TEXT NOT NULL,
+    finished_at TEXT,
+    ms          INTEGER,
+    attempts    INTEGER NOT NULL DEFAULT 1,
+    last_retry  TEXT,                 -- why the last retry happened (429, timeout...)
+    error       TEXT
+  );
+  CREATE INDEX llm_calls_open_idx ON llm_calls(finished_at, started_at);
+  `,
 ];
 
 export function openDb(file: string): DB {

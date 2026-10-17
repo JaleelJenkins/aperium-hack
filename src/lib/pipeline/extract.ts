@@ -71,6 +71,7 @@ export function claudeExtractor(llm: Llm, model = DEFAULT_MODELS.extract, imageM
       const { input } = await llm.call<{ pages: { page: number; text: string }[]; summary: string }>({
         model,
         hint: "extract-pdf",
+        label: filename,
         maxTokens: 8000,
         system:
           "You transcribe documents for an evidence system. Copy each page's text verbatim, in reading order, " +
@@ -109,6 +110,7 @@ export function claudeExtractor(llm: Llm, model = DEFAULT_MODELS.extract, imageM
       const { input } = await llm.call<ImageExtraction>({
         model: imageModel,
         hint: "extract-image",
+        label: filename,
         maxTokens: 2000,
         system:
           "You describe images attached to client emails for an evidence system. Describe what the image shows " +
