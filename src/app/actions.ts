@@ -6,7 +6,19 @@
  */
 import { revalidatePath } from "next/cache";
 import { getDb } from "@/lib/db";
+import {
+  approveAction,
+  decideNewProject,
+  editAndApproveAction,
+  rejectAction,
+  type ActionEdit,
+  type NewProjectDecision,
+  type SaveAsRule,
+} from "@/lib/approvals";
+import { draftApiFor } from "@/lib/gmail/client";
+import { retryAction, runExecutor } from "@/lib/pipeline/execute";
 import { updateProjectSummary } from "@/lib/projects";
+import { createRule, deleteRule, setRuleEnabled, updateRuleText, type NewRule } from "@/lib/rules";
 import {
   dryRunOne,
   finishDryRun,
@@ -77,6 +89,105 @@ export async function updateProjectSummaryAction(projectId: string, summary: str
   try {
     updateProjectSummary(getDb(), projectId, summary);
     return done("Summary saved. New email is matched against it from now on.");
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+// ---------------------------------------------------------------- approval queue (F5)
+
+/** After approval, try to execute right away; the worker retries anything left over. */
+async function executeNow(id: string): Promise<string> {
+  const db = getDb();
+  try {
+    const r = await runExecutor(db, draftApiFor(db), { onlyId: id });
+    if (r.drafts) return " Gmail draft created in the thread. Open Gmail to send it.";
+    if (r.tasks) return " Added to Waiting on us.";
+    if (r.failed.length) return ` Couldn't create the draft: ${r.failed[0].error}`;
+    return " The worker will create the Gmail draft on its next pass.";
+  } catch (err) {
+    return ` The worker will retry: ${err instanceof Error ? err.message : String(err)}`;
+  }
+}
+
+export async function approveActionAction(id: string): Promise<ActionResult> {
+  try {
+    approveAction(getDb(), id, "user");
+    return done(`Approved.${await executeNow(id)}`);
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+export async function editAndApproveActionAction(id: string, edit: ActionEdit): Promise<ActionResult> {
+  try {
+    editAndApproveAction(getDb(), id, edit, "user");
+    return done(`Saved your edit and approved.${await executeNow(id)}`);
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+export async function rejectActionAction(id: string, reason: string, saveAsRule: SaveAsRule | null): Promise<ActionResult> {
+  try {
+    const rule = rejectAction(getDb(), id, reason, "user", saveAsRule ?? undefined);
+    return done(rule ? `Rejected. Saved as rule ${rule.code}: future emails are reviewed against it.` : "Rejected. The reason is logged.");
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+export async function decideNewProjectAction(id: string, decision: NewProjectDecision): Promise<ActionResult> {
+  try {
+    const { projectId } = decideNewProject(getDb(), id, decision, "user");
+    return done(`Filed to ${projectId}. Its mail goes through Reason and Review on the next pipeline pass.`);
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+export async function retryActionAction(id: string): Promise<ActionResult> {
+  try {
+    retryAction(getDb(), id, "user");
+    return done(`Retrying.${await executeNow(id)}`);
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+// ---------------------------------------------------------------- review rules
+
+export async function createRuleAction(input: NewRule): Promise<ActionResult> {
+  try {
+    const r = createRule(getDb(), { ...input, createdBy: "user" });
+    return done(`Rule ${r.code} saved. It applies to every email reviewed from now on.`);
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+export async function setRuleEnabledAction(id: string, enabled: boolean): Promise<ActionResult> {
+  try {
+    setRuleEnabled(getDb(), id, enabled);
+    return done(enabled ? "Rule turned on." : "Rule turned off. It's kept, just not applied.");
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+export async function updateRuleTextAction(id: string, text: string): Promise<ActionResult> {
+  try {
+    updateRuleText(getDb(), id, text);
+    return done("Rule updated.");
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+export async function deleteRuleAction(id: string): Promise<ActionResult> {
+  try {
+    deleteRule(getDb(), id);
+    return done("Rule deleted.");
   } catch (err) {
     return fail(err);
   }

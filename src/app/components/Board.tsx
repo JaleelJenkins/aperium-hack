@@ -122,6 +122,15 @@ function Card({ card, triage, hrefFor, selected }: { card: BoardCard; triage: bo
           </span>
         )}
         {failed && <span className="meta-item failed">{card.status}</span>}
+        {card.status === "proposed" && (card.kind === "draft_reply" || card.kind === "internal_task" || card.kind === "new_project") && (
+          <span className="meta-item waiting">{card.kind === "new_project" ? "Choose a project" : "Awaiting your approval"}</span>
+        )}
+        {(card.status === "approved" || card.status === "edited") && (
+          <span className="meta-item processing">
+            <span className="pulse" />
+            Approved · {card.kind === "draft_reply" ? "creating draft" : "adding task"}
+          </span>
+        )}
         {doneish && card.status !== "done" && (
           <span className="meta-item">{card.status === "executed" ? "Gmail draft created" : card.status}</span>
         )}

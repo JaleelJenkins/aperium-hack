@@ -119,6 +119,8 @@ export interface GmailApi {
   listMessageIds(query: string, max: number): Promise<string[]>;
   getMessage(id: string): Promise<gmail_v1.Schema$Message>;
   getAttachment(messageId: string, attachmentId: string): Promise<Buffer>;
+  /** Executor only: a draft in the thread (gmail.compose). There is deliberately no send. */
+  createDraft(raw: string, threadId: string | null): Promise<{ id: string }>;
 }
 
 export function gmailApi(auth: OAuth2Client): GmailApi {
@@ -162,6 +164,14 @@ export function gmailApi(auth: OAuth2Client): GmailApi {
       const { data } = await gmail.users.messages.attachments.get({ userId: "me", messageId, id: attachmentId });
       return decodeBase64Url(data.data ?? "");
     },
+    async createDraft(raw, threadId) {
+      const { data } = await gmail.users.drafts.create({
+        userId: "me",
+        requestBody: { message: { raw: Buffer.from(raw, "utf8").toString("base64url"), ...(threadId ? { threadId } : {}) } },
+      });
+      if (!data.id) throw new Error("Gmail returned no draft id");
+      return { id: data.id };
+    },
   };
 }
 
@@ -169,4 +179,13 @@ export function gmailApi(auth: OAuth2Client): GmailApi {
 export function isHistoryExpired(err: unknown): boolean {
   const e = err as { code?: number | string; status?: number; response?: { status?: number } };
   return e?.code === 404 || e?.code === "404" || e?.status === 404 || e?.response?.status === 404;
+}
+
+/** Executor's view: the Gmail API for a connected inbox, or null if it isn't connected. */
+export function draftApiFor(db: DB): (account: string) => Pick<GmailApi, "createDraft"> | null {
+  const accounts = new Map(listAccounts(db).map((a) => [a.email.toLowerCase(), a]));
+  return (account) => {
+    const row = accounts.get(account.toLowerCase());
+    return row ? gmailApi(authedClient(db, row)) : null;
+  };
 }

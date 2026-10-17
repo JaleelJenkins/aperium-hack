@@ -279,6 +279,7 @@ interface ActionRow {
   review_score: number | null;
   created_at: string;
   decided_at: string | null;
+  error: string | null;
 }
 interface MailRow {
   id: string;
@@ -320,7 +321,7 @@ export function getBoard(db: DB, opts: { filter?: BoardFilter; now?: number } = 
   const actions = db
     .prepare(
       `SELECT id, project_id, message_id, type, payload_json, status, evidence_json, produced_by_model,
-              reviewed_by_model, review_verdict, review_score, created_at, decided_at
+              reviewed_by_model, review_verdict, review_score, created_at, decided_at, error
          FROM actions`,
     )
     .all() as ActionRow[];
@@ -337,7 +338,7 @@ export function getBoard(db: DB, opts: { filter?: BoardFilter; now?: number } = 
                   WHERE lower(m.sender_email) LIKE '%@' || d.value)
               ) AS guessed_client
          FROM messages m JOIN threads t ON t.gmail_thread_id = m.thread_id
-        WHERE t.project_id IS NULL OR m.status != 'reviewed'
+        WHERE m.status != 'dismissed' AND (t.project_id IS NULL OR m.status != 'reviewed')
         ORDER BY m.received_at DESC
         LIMIT 300`,
     )
@@ -525,11 +526,12 @@ export function getBoard(db: DB, opts: { filter?: BoardFilter; now?: number } = 
       evidenceKind: link.kind,
       review: reviewOf(a.review_verdict, model(a.reviewed_by_model), a.review_score),
       producedBy: model(a.produced_by_model),
-      status: a.status,
+      status: a.status === "failed" ? `failed: ${a.error ?? "unknown error"}` : a.status,
       at: a.decided_at ?? a.created_at,
       route: routeFor(a.message_id),
     };
-    if (a.status === "proposed" || a.status === "approved" || a.status === "edited") lane.columns.approval.push(card);
+    // Approved/edited wait here until the executor creates the draft; failures stay visible to retry.
+    if (a.status === "proposed" || a.status === "approved" || a.status === "edited" || a.status === "failed") lane.columns.approval.push(card);
     else if (a.project_id) doneAll.get(a.project_id)!.push(card);
   }
 

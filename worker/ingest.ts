@@ -9,10 +9,11 @@ loadEnv({ path: [".env.local", ".env"], quiet: true });
 
 import { config } from "../src/lib/config";
 import { getDb } from "../src/lib/db";
-import { listAccounts } from "../src/lib/gmail/client";
+import { draftApiFor, listAccounts } from "../src/lib/gmail/client";
 import { syncAll } from "../src/lib/ingest/sync";
 import { applySeed, readSeed } from "../src/lib/seed";
 import { hasApiKey, providerSummary } from "../src/lib/pipeline/llm";
+import { runExecutor } from "../src/lib/pipeline/execute";
 import { defaultDeps, describe, runPipeline } from "../src/lib/pipeline/run";
 
 const pipelineDeps = defaultDeps();
@@ -44,6 +45,15 @@ async function tick(): Promise<void> {
     for (const line of describe(await runPipeline(db, pipelineDeps))) log(line);
   } catch (err) {
     log(`pipeline failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  // Approved actions: Gmail drafts (drafts.create, never send) and tasks onto the board.
+  try {
+    const x = await runExecutor(db, draftApiFor(db));
+    if (x.drafts || x.tasks || x.failed.length) {
+      log(`executor: ${x.drafts} draft(s) created, ${x.tasks} task(s) added` + (x.failed.length ? `, ${x.failed.length} failed (${x.failed.map((f) => f.error).join("; ")})` : ""));
+    }
+  } catch (err) {
+    log(`executor failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
