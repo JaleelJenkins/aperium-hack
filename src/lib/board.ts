@@ -41,6 +41,10 @@ export type DueState = "overdue" | "soon" | "later";
 
 export interface BoardCard {
   id: string;
+  /** "signal:<id>" | "action:<id>" | "email:<id>": what the evidence drawer opens. */
+  ref: string;
+  /** Jira-style ticket key, e.g. "HP-4" (client initials + sequence). Null for raw mail. */
+  key: string | null;
   kind: CardKind;
   title: string;
   /** Secondary line: sender for mail, recipient for drafts, status for failures. */
@@ -49,9 +53,10 @@ export interface BoardCard {
   dueState: DueState | null;
   /** Where clicking the card goes: the evidence (email line / PDF page) or the message. */
   href: string;
-  /** Short evidence label, e.g. "Email L4", "PDF p.2". */
+  /** Short evidence label for the mono chip, e.g. "EMAIL · L4", "FloorPlan.pdf · p.2". */
   evidenceLabel: string | null;
-  review: { verdict: "pass" | "revise"; model: string | null } | null;
+  evidenceKind: "message" | "pdf" | "image" | "audio" | null;
+  review: { verdict: "pass" | "revise"; model: string | null; score: number | null } | null;
   producedBy: string | null;
   status: string | null;
   at: string;
@@ -119,24 +124,88 @@ export function dueState(dueAt: string | null, now: number): DueState | null {
   return t - now <= SOON_MS ? "soon" : "later";
 }
 
-/** Link + label for the first piece of evidence, falling back to the message. */
-function evidenceLink(
-  evidence: Evidence[],
+export interface EvidenceLink {
+  href: string;
+  label: string | null;
+  kind: BoardCard["evidenceKind"];
+}
+
+/**
+ * Link + mono chip label for one piece of evidence. Exported for the evidence drawer.
+ * filenameFor resolves attachment ids so a PDF chip reads "FloorPlan.pdf · p.2".
+ */
+export function evidenceLinkFor(
+  ev: Evidence | undefined,
   cleanTextFor: (messageId: string) => string | undefined,
+  filenameFor: (attachmentId: string) => string | undefined,
   fallbackMessageId: string | null,
-): { href: string; label: string | null } {
-  const ev = evidence[0];
+): EvidenceLink {
   if (!ev) {
-    return { href: fallbackMessageId ? `/messages/${encodeURIComponent(fallbackMessageId)}` : "#", label: null };
+    return { href: fallbackMessageId ? `/messages/${encodeURIComponent(fallbackMessageId)}` : "#", label: null, kind: null };
   }
   if (ev.kind === "message") {
     const href = evidenceHref(ev, cleanTextFor(ev.message_id));
     const line = href.match(/#L(\d+)$/)?.[1];
-    return { href, label: line ? `Email L${line}` : "Email" };
+    return { href, label: line ? `EMAIL · L${line}` : "EMAIL", kind: "message" };
   }
-  const label =
-    ev.kind === "attachment_page" ? `PDF p.${ev.page}` : ev.kind === "attachment_region" ? "Image" : "Audio";
-  return { href: evidenceHref(ev), label };
+  const name = filenameFor(ev.attachment_id);
+  if (ev.kind === "attachment_page") return { href: evidenceHref(ev), label: `${name ?? "PDF"} · p.${ev.page}`, kind: "pdf" };
+  if (ev.kind === "attachment_region") return { href: evidenceHref(ev), label: name ?? "Image", kind: "image" };
+  return { href: evidenceHref(ev), label: `${name ?? "Audio"} · ${ev.start_s}s`, kind: "audio" };
+}
+
+/** "Harbor & Pine Architects" -> "HP", "Vector Freight" -> "VF", "Acme" -> "AC". */
+export function clientPrefix(name: string): string {
+  const words = name.replace(/&/g, " ").split(/\s+/).filter((w) => /^[A-Za-z]/.test(w));
+  const p = words.length >= 2 ? words[0][0] + words[1][0] : (words[0] ?? "XX").slice(0, 2);
+  return p.toUpperCase();
+}
+
+/**
+ * Ticket keys for every signal and action: client prefix + creation order within that
+ * client ("HP-1", "HP-2", ...). Stable as long as rows aren't deleted, which the pipeline
+ * never does outside a demo reset.
+ */
+export function ticketKeys(db: DB): Map<string, string> {
+  const rows = db
+    .prepare(
+      `SELECT x.id, c.name AS client_name FROM (
+         SELECT id, project_id, created_at FROM signals
+         UNION ALL
+         SELECT id, project_id, created_at FROM actions WHERE project_id IS NOT NULL
+       ) x JOIN projects p ON p.id = x.project_id JOIN clients c ON c.id = p.client_id
+       ORDER BY c.id, x.created_at, x.id`,
+    )
+    .all() as { id: string; client_name: string }[];
+  const keys = new Map<string, string>();
+  const seq = new Map<string, number>();
+  for (const r of rows) {
+    const prefix = clientPrefix(r.client_name);
+    const n = (seq.get(prefix) ?? 0) + 1;
+    seq.set(prefix, n);
+    keys.set(r.id, `${prefix}-${n}`);
+  }
+  return keys;
+}
+
+/**
+ * Model profile id -> concrete model name ("claude-haiku" -> "claude-haiku-5-5"), so cards
+ * show the real model in the chain of custody. Unknown ids pass through unchanged.
+ */
+export function modelNames(db: DB): (id: string | null) => string | null {
+  const rows = db.prepare(`SELECT id, model_name FROM model_profiles`).all() as { id: string; model_name: string }[];
+  const map = new Map(rows.map((r) => [r.id, r.model_name]));
+  return (id) => (id == null ? null : (map.get(id) ?? id));
+}
+
+/** Filenames for attachment ids, for evidence chips. */
+export function attachmentNames(db: DB, ids: Iterable<string>): Map<string, string> {
+  const list = [...new Set(ids)];
+  if (!list.length) return new Map();
+  const rows = db
+    .prepare(`SELECT id, filename FROM attachments WHERE id IN (${list.map(() => "?").join(",")})`)
+    .all(...list) as { id: string; filename: string }[];
+  return new Map(rows.map((r) => [r.id, r.filename]));
 }
 
 interface ProjectRow {
@@ -161,6 +230,7 @@ interface SignalRow {
   produced_by_model: string;
   reviewed_by_model: string | null;
   review_verdict: string | null;
+  review_score: number | null;
   created_at: string;
 }
 interface ActionRow {
@@ -174,6 +244,7 @@ interface ActionRow {
   produced_by_model: string;
   reviewed_by_model: string | null;
   review_verdict: string | null;
+  review_score: number | null;
   created_at: string;
   decided_at: string | null;
 }
@@ -189,8 +260,8 @@ interface MailRow {
   guessed_client: string | null;
 }
 
-function reviewOf(verdict: string | null, model: string | null): BoardCard["review"] {
-  return verdict === "pass" || verdict === "revise" ? { verdict, model } : null;
+function reviewOf(verdict: string | null, model: string | null, score: number | null): BoardCard["review"] {
+  return verdict === "pass" || verdict === "revise" ? { verdict, model, score } : null;
 }
 
 export function getBoard(db: DB, opts: { filter?: BoardFilter; now?: number } = {}): Board {
@@ -209,7 +280,7 @@ export function getBoard(db: DB, opts: { filter?: BoardFilter; now?: number } = 
   const signals = db
     .prepare(
       `SELECT id, project_id, message_id, type, text, due_at, status, evidence_json, produced_by_model,
-              reviewed_by_model, review_verdict, created_at
+              reviewed_by_model, review_verdict, review_score, created_at
          FROM signals WHERE status != 'superseded'`,
     )
     .all() as SignalRow[];
@@ -217,7 +288,7 @@ export function getBoard(db: DB, opts: { filter?: BoardFilter; now?: number } = 
   const actions = db
     .prepare(
       `SELECT id, project_id, message_id, type, payload_json, status, evidence_json, produced_by_model,
-              reviewed_by_model, review_verdict, created_at, decided_at
+              reviewed_by_model, review_verdict, review_score, created_at, decided_at
          FROM actions`,
     )
     .all() as ActionRow[];
@@ -262,6 +333,14 @@ export function getBoard(db: DB, opts: { filter?: BoardFilter; now?: number } = 
     for (const r of rows) cleanText.set(r.id, r.clean_text);
   }
   const textFor = (id: string) => cleanText.get(id);
+  const citedAttachments: string[] = [];
+  for (const r of [...signals, ...actions]) {
+    for (const ev of parseEvidence(r.evidence_json)) if (ev.kind !== "message") citedAttachments.push(ev.attachment_id);
+  }
+  const names = attachmentNames(db, citedAttachments);
+  const nameFor = (id: string) => names.get(id);
+  const keys = ticketKeys(db);
+  const model = modelNames(db);
 
   const lanes = new Map<string, Lane>();
   const doneAll = new Map<string, BoardCard[]>();
@@ -299,18 +378,21 @@ export function getBoard(db: DB, opts: { filter?: BoardFilter; now?: number } = 
   for (const s of signals) {
     const lane = lanes.get(s.project_id);
     if (!lane) continue;
-    const { href, label } = evidenceLink(parseEvidence(s.evidence_json), textFor, s.message_id);
+    const link = evidenceLinkFor(parseEvidence(s.evidence_json)[0], textFor, nameFor, s.message_id);
     const card: BoardCard = {
       id: s.id,
+      ref: `signal:${s.id}`,
+      key: keys.get(s.id) ?? null,
       kind: s.type,
       title: s.text,
       detail: null,
       dueAt: s.due_at,
       dueState: s.status === "open" ? dueState(s.due_at, now) : null,
-      href,
-      evidenceLabel: label,
-      review: reviewOf(s.review_verdict, s.reviewed_by_model),
-      producedBy: s.produced_by_model,
+      href: link.href,
+      evidenceLabel: link.label,
+      evidenceKind: link.kind,
+      review: reviewOf(s.review_verdict, model(s.reviewed_by_model), s.review_score),
+      producedBy: model(s.produced_by_model),
       status: s.status,
       at: s.created_at,
     };
@@ -332,7 +414,7 @@ export function getBoard(db: DB, opts: { filter?: BoardFilter; now?: number } = 
     } catch {
       // keep empty
     }
-    const { href, label } = evidenceLink(parseEvidence(a.evidence_json), textFor, a.message_id);
+    const link = evidenceLinkFor(parseEvidence(a.evidence_json)[0], textFor, nameFor, a.message_id);
     const title =
       a.type === "draft_reply"
         ? payload.subject || "Draft reply"
@@ -341,15 +423,18 @@ export function getBoard(db: DB, opts: { filter?: BoardFilter; now?: number } = 
           : `New project? ${payload.suggested_name ?? ""}`.trim();
     const card: BoardCard = {
       id: a.id,
+      ref: `action:${a.id}`,
+      key: keys.get(a.id) ?? null,
       kind: a.type,
       title,
       detail: a.type === "draft_reply" && payload.to?.length ? `To ${payload.to.join(", ")}` : null,
       dueAt: null,
       dueState: null,
-      href,
-      evidenceLabel: label,
-      review: reviewOf(a.review_verdict, a.reviewed_by_model),
-      producedBy: a.produced_by_model,
+      href: link.href,
+      evidenceLabel: link.label,
+      evidenceKind: link.kind,
+      review: reviewOf(a.review_verdict, model(a.reviewed_by_model), a.review_score),
+      producedBy: model(a.produced_by_model),
       status: a.status,
       at: a.decided_at ?? a.created_at,
     };
@@ -363,6 +448,8 @@ export function getBoard(db: DB, opts: { filter?: BoardFilter; now?: number } = 
     const from = m.sender_name || m.sender_email || "unknown sender";
     lane.columns.triage.push({
       id: m.id,
+      ref: `email:${m.id}`,
+      key: null,
       kind: "email",
       title: m.subject || "(no subject)",
       detail: m.project_id ? from : `${from}${m.guessed_client ? ` · likely ${m.guessed_client}` : ""}`,
@@ -370,6 +457,7 @@ export function getBoard(db: DB, opts: { filter?: BoardFilter; now?: number } = 
       dueState: null,
       href: `/messages/${encodeURIComponent(m.id)}`,
       evidenceLabel: null,
+      evidenceKind: null,
       review: null,
       producedBy: null,
       status: m.status === "failed" ? `failed: ${m.error ?? "unknown error"}` : m.status,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { dueState, getBoard, listClientsForNav } from "../src/lib/board";
+import { clientPrefix, dueState, getBoard, listClientsForNav, ticketKeys } from "../src/lib/board";
 import { openDb, type DB } from "../src/lib/db";
+import { caughtClaims, inspect, parseInspectRef } from "../src/lib/inspect";
 import { applySeed, readSeed } from "../src/lib/seed";
 
 const NOW = Date.parse("2026-10-17T12:00:00Z");
@@ -53,13 +54,26 @@ describe("portfolio board", () => {
     expect(lane.stats).toMatchObject({ open: 3, overdue: 1, dueSoon: 1, approvals: 1, blockedByReview: 1 });
   });
 
-  it("links cards to the exact evidence line and labels the review", () => {
+  it("links cards to the exact evidence line, keys them, and names the real models", () => {
     const lane = getBoard(seeded(), { now: NOW }).clients.find((c) => c.id === "harbor-pine")!.lanes[0];
     const ask = lane.columns.on_us.find((c) => c.id === "s-ask")!;
     expect(ask.href).toBe("/messages/m1#L3");
-    expect(ask.evidenceLabel).toBe("Email L3");
-    expect(ask.review).toEqual({ verdict: "pass", model: "claude-opus" });
+    expect(ask.evidenceLabel).toBe("EMAIL · L3");
+    expect(ask.ref).toBe("signal:s-ask");
+    expect(ask.key).toMatch(/^HP-\d+$/);
+    // profile ids from seed.json resolve to concrete model names for the chain of custody
+    expect(ask.producedBy).toBe("claude-haiku-5-5");
+    expect(ask.review).toEqual({ verdict: "pass", model: "claude-opus-5-5", score: null });
     expect(ask.dueState).toBe("soon");
+  });
+
+  it("gives every signal and action a unique ticket key per client", () => {
+    const keys = [...ticketKeys(seeded()).values()];
+    expect(keys).toHaveLength(6); // 5 signals + 1 action, all Harbor & Pine
+    expect(new Set(keys).size).toBe(6);
+    expect(keys.every((k) => k.startsWith("HP-"))).toBe(true);
+    expect(clientPrefix("Vector Freight")).toBe("VF");
+    expect(clientPrefix("Acme")).toBe("AC");
   });
 
   it("overdue work makes a project at risk, here and in the sidebar", () => {
@@ -81,6 +95,27 @@ describe("portfolio board", () => {
     const attention = getBoard(db, { now: NOW, filter: "attention" }).clients.flatMap((c) => c.lanes).map((l) => l.id);
     expect(all).toHaveLength(5);
     expect(attention).toEqual(["harbor-lobby"]);
+  });
+
+  it("evidence drawer: highlights the quoted line and shows the review audit", () => {
+    const db = seeded();
+    const item = inspect(db, parseInspectRef("signal:s-ask")!)!;
+    expect(item.project).toEqual({ id: "harbor-lobby", name: "Lobby redesign", clientName: "Harbor & Pine Architects" });
+    expect(item.sources[0].lines.filter((l) => l.hit).map((l) => l.n)).toEqual([3]);
+    expect(item.audit).toMatchObject({ producer: "claude-haiku-5-5", reviewer: "claude-opus-5-5", verdict: "pass" });
+    expect(parseInspectRef("bogus:x")).toBeNull();
+    expect(parseInspectRef("caught")).toEqual({ type: "caught" });
+  });
+
+  it("caught-by-review vault lists blocked claims with what contradicted them", () => {
+    const db = seeded();
+    db.prepare(
+      `UPDATE model_reviews SET message_id = 'm1', claim_json = ?, conflicting_evidence_json = ? WHERE id = 'r1'`,
+    ).run(JSON.stringify({ text: "Scope covers 3 floors" }), JSON.stringify([{ kind: "message", message_id: "m1", quote: "Could you send" }]));
+    const [c] = caughtClaims(db);
+    expect(c).toMatchObject({ claim: "Scope covers 3 floors", notes: "PDF p.2", blockedBy: "review" });
+    expect(c.project?.name).toBe("Lobby redesign");
+    expect(c.conflicting[0].lines.find((l) => l.hit)?.n).toBe(3);
   });
 
   it("classifies due dates", () => {

@@ -27,11 +27,14 @@ export function dueText(iso: string, overdue: boolean, now = Date.now()): string
   return `Due ${short}`;
 }
 
-/** "claude-opus" / "claude-opus-5-5" -> "Opus". */
+/** "claude-opus" -> "Opus", "claude-haiku-5-5" -> "Haiku 5.5", "gpt-5-mini" -> "Gpt 5 mini". */
 export function modelShort(id: string | null): string {
   if (!id) return "";
-  const word = id.replace(/^claude-/, "").split(/[-_]/)[0];
-  return word.charAt(0).toUpperCase() + word.slice(1);
+  const [word, ...rest] = id.replace(/^claude-/, "").split(/[-_]/);
+  const name = word.charAt(0).toUpperCase() + word.slice(1);
+  if (!rest.length) return name;
+  const version = rest.every((p) => /^\d+$/.test(p)) ? rest.join(".") : rest.join(" ");
+  return `${name} ${version}`;
 }
 
 export function initials(name: string): string {
