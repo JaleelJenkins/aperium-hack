@@ -10,7 +10,7 @@ import { checkSendable, type ActionRow } from "../approvals";
 import { audit, type DB } from "../db";
 
 export interface DraftApi {
-  createDraft(raw: string, threadId: string | null): Promise<{ id: string }>;
+  createDraft(raw: string, threadId: string | null): Promise<{ id: string; messageId?: string | null }>;
 }
 
 export interface ExecuteResult {
@@ -81,7 +81,7 @@ export async function runExecutor(db: DB, apiFor: (account: string) => DraftApi 
             signalId, a.project_id, a.message_id, payload.notes ? `${payload.title}: ${payload.notes}` : payload.title ?? "Task",
             a.evidence_json, a.produced_by_model, a.review_verdict, a.reviewed_by_model, a.review_score, a.review_reason,
           );
-          db.prepare(`UPDATE actions SET status = 'executed', error = NULL WHERE id = ?`).run(a.id);
+          db.prepare(`UPDATE actions SET status = 'executed', executed_at = ?, error = NULL WHERE id = ?`).run(new Date().toISOString(), a.id);
           audit(db, "executor", "action.executed", `action:${a.id}`, { type: a.type, signal: signalId });
         })();
         out.tasks++;
@@ -107,8 +107,10 @@ export async function runExecutor(db: DB, apiFor: (account: string) => DraftApi 
         references: last ? [last.references_header, last.rfc_message_id].filter(Boolean).join(" ") : null,
       });
       const draft = await api.createDraft(raw, thread.id);
-      db.prepare(`UPDATE actions SET status = 'executed', gmail_draft_id = ?, error = NULL WHERE id = ?`).run(draft.id, a.id);
-      audit(db, "executor", "action.executed", `action:${a.id}`, { type: a.type, gmail_draft_id: draft.id, method: "drafts.create" });
+      db.prepare(
+        `UPDATE actions SET status = 'executed', gmail_draft_id = ?, gmail_draft_message_id = ?, executed_at = ?, error = NULL WHERE id = ?`,
+      ).run(draft.id, draft.messageId ?? null, new Date().toISOString(), a.id);
+      audit(db, "executor", "action.executed", `action:${a.id}`, { type: a.type, gmail_draft_id: draft.id, method: "drafts.create", account: thread.account });
       out.drafts++;
     } catch (err) {
       const error = (err instanceof Error ? err.message : String(err)).slice(0, 500);

@@ -13,6 +13,7 @@ import type { DB } from "./db";
 import { draftApiFor, listAccounts } from "./gmail/client";
 import { syncAll } from "./ingest/sync";
 import { runExecutor, type ExecuteResult } from "./pipeline/execute";
+import { recoverInterrupted } from "./pipeline/review";
 import { defaultDeps, runPipeline, type PipelineDeps, type PipelineResult } from "./pipeline/run";
 import { applySeed, readSeed } from "./seed";
 
@@ -62,6 +63,8 @@ export async function processWaiting(db: DB, owner: string, deps: PipelineDeps =
   const token = acquirePipelineLock(db, owner);
   if (!token) return { ran: false, reason: "busy" };
   try {
+    // Holding the lease means nobody else is mid-run: anything left "reasoning"/"reviewing" was interrupted.
+    recoverInterrupted(db);
     // Loop until nothing moves: each stage takes a batch, and a big inbox needs several.
     let pipeline = await runPipeline(db, deps);
     for (let i = 0; i < 10 && moved(pipeline); i++) {

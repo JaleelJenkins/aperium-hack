@@ -128,7 +128,7 @@ export interface GmailApi {
   getMessage(id: string): Promise<gmail_v1.Schema$Message>;
   getAttachment(messageId: string, attachmentId: string): Promise<Buffer>;
   /** Executor only: a draft in the thread (gmail.compose). There is deliberately no send. */
-  createDraft(raw: string, threadId: string | null): Promise<{ id: string }>;
+  createDraft(raw: string, threadId: string | null): Promise<{ id: string; messageId: string | null }>;
 }
 
 export function gmailApi(auth: OAuth2Client): GmailApi {
@@ -178,7 +178,7 @@ export function gmailApi(auth: OAuth2Client): GmailApi {
         requestBody: { message: { raw: Buffer.from(raw, "utf8").toString("base64url"), ...(threadId ? { threadId } : {}) } },
       });
       if (!data.id) throw new Error("Gmail returned no draft id");
-      return { id: data.id };
+      return { id: data.id, messageId: data.message?.id ?? null };
     },
   };
 }

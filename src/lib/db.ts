@@ -446,6 +446,11 @@ const MIGRATIONS: string[] = [
   CREATE INDEX IF NOT EXISTS messages_status_rec_idx ON messages(status, received_at DESC);
   CREATE INDEX IF NOT EXISTS threads_proj_last_idx ON threads(project_id, last_message_at DESC);
   `,
+
+  /* 010: link the audit trail to the exact Gmail draft */ `
+  ALTER TABLE actions ADD COLUMN gmail_draft_message_id TEXT;  -- opens the draft in Gmail
+  ALTER TABLE actions ADD COLUMN executed_at TEXT;
+  `,
 ];
 
 export function openDb(file: string): DB {

@@ -17,7 +17,7 @@ export async function POST() {
   const db = getDb();
   const seeded = ensureSeeded(db);
   const results = await syncAll(db);
-  const waiting = (db.prepare(`SELECT COUNT(*) AS n FROM messages WHERE status IN ('ingested', 'extracted', 'resolved', 'reasoned')`).get() as { n: number }).n;
+  const waiting = (db.prepare(`SELECT COUNT(*) AS n FROM messages WHERE status IN ('ingested', 'extracted', 'resolved', 'reasoning', 'reasoned', 'reviewing')`).get() as { n: number }).n;
   const approved = (db.prepare(`SELECT COUNT(*) AS n FROM actions WHERE status IN ('approved', 'edited')`).get() as { n: number }).n;
   const busy = pipelineBusy(db);
   const pipeline = busy ? "busy" : waiting || approved ? "started" : "idle";

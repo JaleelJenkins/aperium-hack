@@ -109,6 +109,93 @@ function EditedNote({ a }: { a: NonNullable<Inspection["approval"]> }) {
   );
 }
 
+/** Audit steps 3 and 4: the person's decision, then what the executor did (the Gmail draft). */
+function HumanAndExecutorSteps({ a }: { a: NonNullable<Inspection["approval"]> }) {
+  const decided = a.status !== "proposed";
+  const approved = ["approved", "edited", "executed", "failed"].includes(a.status) && a.decisionReason == null;
+  const edited = !!a.original;
+  const draft = a.type === "draft_reply";
+  return (
+    <>
+      <div className="audit-step human">
+        <span className="ico">
+          <Icon name="check" size={12} />
+        </span>
+        <div className="audit-who">
+          Approval · {decided ? (a.decidedBy === "user" ? "you" : (a.decidedBy ?? "a person")) : "waiting on you"}
+          {!decided ? (
+            <span className="verdict draft">Pending</span>
+          ) : a.status === "rejected" ? (
+            <span className="verdict block">Rejected</span>
+          ) : (
+            <span className="verdict pass">{edited ? "Edited & approved" : "Approved"}</span>
+          )}
+          {a.decidedAt && <span>{ago(a.decidedAt)}</span>}
+        </div>
+        <div className="audit-what">
+          {!decided
+            ? "Nothing leaves the board until a person approves it."
+            : a.status === "rejected"
+              ? `“${a.decisionReason ?? "No reason given"}”`
+              : edited
+                ? "Changed before approving; the model's version is kept above."
+                : "Approved as the model proposed it."}
+        </div>
+      </div>
+      {approved && (
+        <div className={`audit-step exec${a.status === "failed" ? " failed" : ""}`}>
+          <span className="ico">
+            <Icon name="mail" size={12} />
+          </span>
+          <div className="audit-who">
+            {draft ? (
+              <>
+                Gmail · <span className="mono">drafts.create</span>
+              </>
+            ) : (
+              "Board · task"
+            )}
+            {a.status === "executed" ? (
+              <span className="verdict pass">{draft ? "Draft created" : "Task added"}</span>
+            ) : a.status === "failed" ? (
+              <span className="verdict block">Failed</span>
+            ) : (
+              <span className="verdict draft">{draft ? "Creating draft…" : "Adding…"}</span>
+            )}
+            {a.executedAt && <span>{ago(a.executedAt)}</span>}
+          </div>
+          <div className="audit-what">
+            {a.status === "failed" ? (
+              <span className="bad-text" style={{ fontWeight: 500 }}>
+                {a.error}
+              </span>
+            ) : a.status === "executed" && draft ? (
+              <>
+                Saved as a draft in the original thread{a.account ? ` in ${a.account}` : ""}. Nothing was sent.
+                <div className="exec-links">
+                  {a.gmailDraftUrl && (
+                    <a className="btn sm" href={a.gmailDraftUrl} target="_blank" rel="noreferrer">
+                      <Icon name="external" size={12} />
+                      Open draft in Gmail
+                    </a>
+                  )}
+                  {a.gmailDraftId && <span className="mono muted">draft {a.gmailDraftId}</span>}
+                </div>
+              </>
+            ) : a.status === "executed" ? (
+              "Added to Waiting on us with the same evidence."
+            ) : draft ? (
+              "The executor is creating the Gmail draft (it retries on the worker's next poll)."
+            ) : (
+              "Adding to Waiting on us."
+            )}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 const VERDICT_LABEL: Record<string, string> = { pass: "Verified", revise: "Revised", block: "Blocked" };
 
 /** Which Reason → Review pair the router picked for this email, and why. */
@@ -285,6 +372,7 @@ export function InspectorDrawer({ item, hrefFor }: { item: Inspection; hrefFor: 
                 )}
               </div>
             </div>
+            {item.approval && item.approval.type !== "new_project" && <HumanAndExecutorSteps a={item.approval} />}
           </div>
         </div>
       )}

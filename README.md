@@ -291,6 +291,10 @@ npm run pipeline
 
 Recipients are checked again at approval and at execution: only known contacts on the thread. If the draft can't be created (Gmail not connected, `gmail.compose` not granted), the card shows the error with **Retry**. The worker also runs the executor after every poll.
 
+After approval, the drawer's **Model review audit** shows the whole chain: Reason → Review → your approval (or edit/reject) → **Gmail · drafts.create** with the draft id and an **Open draft in Gmail** link.
+
+**Starting over with the 15 seed emails:** `npm run pipeline:reset` shows what it would change; `npm run pipeline:reset -- --yes` keeps one copy of each seed email, removes other mail from the board (it stays in Gmail), clears all pipeline output, and requeues the 15 so the next Sync now processes each exactly once. Clients, projects, summaries and rules are kept.
+
 **"New project?" cards**: file the thread to one of the client's projects (closest match preselected), create a new project, or dismiss it as not client work.
 
 **Review rules** (`/rules`, "Review rules" in the sidebar) are the approval review step: the team writes a rule once and every email reviewed afterwards is held to it.
