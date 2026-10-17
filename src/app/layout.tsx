@@ -2,12 +2,10 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { cache } from "react";
 import { Instrument_Serif, JetBrains_Mono, Plus_Jakarta_Sans } from "next/font/google";
-import { listClientsForNav } from "@/lib/board";
 import { getDb } from "@/lib/db";
 import { caughtCount } from "@/lib/inspect";
 import { Icon } from "./components/Icon";
 import { NavLink } from "./components/NavLink";
-import { hue, initials } from "./format";
 import "./globals.css";
 
 // Design system type scale: serif for page headers, sans for UI, mono for keys/evidence/metrics.
@@ -30,7 +28,6 @@ const getSidebarBadges = cache((db: ReturnType<typeof getDb>) => {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   const db = getDb();
-  const clients = listClientsForNav(db);
   const { caught, rules, approvals, nextApproval } = getSidebarBadges(db);
   return (
     <html lang="en" className={`${serif.variable} ${sans.variable} ${mono.variable}`}>
@@ -55,19 +52,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 Projects
               </NavLink>
             </nav>
-            {clients.length > 0 && (
-              <nav className="side-nav clients">
-                {clients.map((c) => (
-                  <NavLink key={c.id} href={`/#client-${c.id}`} title={`${c.projects} projects · ${c.health.replace("_", " ")}`}>
-                    <span className="avatar sm" style={{ ["--h" as string]: hue(c.name) }} aria-hidden="true">
-                      {initials(c.name)}
-                    </span>
-                    <span className="side-client">{c.name}</span>
-                    <span className={`dot ${c.health}`} />
-                  </NavLink>
-                ))}
-              </nav>
-            )}
 
             <div className="side-label">Queues &amp; trust</div>
             <nav className="side-nav queues">
