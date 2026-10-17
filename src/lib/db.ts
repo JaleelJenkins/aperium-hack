@@ -280,6 +280,66 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX audit_object_idx ON audit_events(object_ref);
   `,
+
+  /* 002: review provenance, "Caught by review" links, live latency/cost */ `
+  -- PRD: every stored item records which model produced it AND which reviewed it.
+  ALTER TABLE signals  ADD COLUMN reviewed_by_model TEXT;
+  ALTER TABLE signals  ADD COLUMN review_score      REAL;
+  ALTER TABLE signals  ADD COLUMN review_reason     TEXT;
+  ALTER TABLE signals  ADD COLUMN original_text     TEXT;  -- Reason's text when review revised it
+  ALTER TABLE signals  ADD COLUMN date_basis        TEXT;  -- how a relative date was resolved (trap 2)
+  ALTER TABLE signals  ADD COLUMN closed_by_message TEXT;  -- message that answered it (closes_signal_ids)
+  ALTER TABLE insights ADD COLUMN reviewed_by_model TEXT;
+  ALTER TABLE insights ADD COLUMN review_score      REAL;
+  ALTER TABLE insights ADD COLUMN review_reason     TEXT;
+  ALTER TABLE actions  ADD COLUMN reviewed_by_model TEXT;
+  ALTER TABLE actions  ADD COLUMN review_score      REAL;
+  ALTER TABLE actions  ADD COLUMN review_reason     TEXT;
+  ALTER TABLE actions  ADD COLUMN message_id        TEXT REFERENCES messages(gmail_message_id) ON DELETE SET NULL;
+
+  -- Blocked items never get a row in their own table, so target_id must be nullable.
+  -- Also: who blocked it, links back to the message/project, and the contradicting evidence.
+  CREATE TABLE model_reviews_v2 (
+    id                        TEXT PRIMARY KEY,
+    target_type               TEXT NOT NULL,          -- signal | insight | action
+    target_id                 TEXT,                   -- stored row id; NULL when blocked
+    tmp_id                    TEXT,                   -- Reason's tmp_id for the item
+    message_id                TEXT REFERENCES messages(gmail_message_id) ON DELETE CASCADE,
+    project_id                TEXT REFERENCES projects(id) ON DELETE CASCADE,
+    produced_by_model         TEXT,
+    reviewer_model            TEXT,                   -- NULL for verify/policy blocks
+    blocked_by                TEXT,                   -- review | verify | policy | NULL when not blocked
+    verdict                   TEXT NOT NULL,          -- pass | revise | block
+    score                     REAL,
+    notes                     TEXT,                   -- one-line reason; shown in "Caught by review"
+    claim_json                TEXT,                   -- the claim as Reason produced it
+    conflicting_evidence_json TEXT NOT NULL DEFAULT '[]',  -- Evidence[] that contradicts the claim
+    at                        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  );
+  INSERT INTO model_reviews_v2 (id, target_type, target_id, reviewer_model, blocked_by, verdict, score, notes, claim_json, at)
+    SELECT id, target_type, target_id, reviewer_model,
+           CASE WHEN verdict = 'block' THEN 'review' END, verdict, score, notes, claim_json, at
+    FROM model_reviews;
+  DROP TABLE model_reviews;
+  ALTER TABLE model_reviews_v2 RENAME TO model_reviews;
+  CREATE INDEX model_reviews_verdict_idx ON model_reviews(verdict, at);
+  CREATE INDEX model_reviews_project_idx ON model_reviews(project_id);
+
+  -- One row per message through Reason + Review: live latency and cost on the dashboard.
+  CREATE TABLE pipeline_runs (
+    id                TEXT PRIMARY KEY,
+    message_id        TEXT NOT NULL REFERENCES messages(gmail_message_id) ON DELETE CASCADE,
+    reason_profile_id TEXT NOT NULL,
+    review_profile_id TEXT NOT NULL,
+    input_tokens      INTEGER NOT NULL DEFAULT 0,
+    output_tokens     INTEGER NOT NULL DEFAULT 0,
+    cost_usd          REAL NOT NULL DEFAULT 0,
+    latency_ms        INTEGER,                        -- messages.received_at -> stored
+    error             TEXT,
+    at                TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  );
+  CREATE INDEX pipeline_runs_message_idx ON pipeline_runs(message_id);
+  `,
 ];
 
 export function openDb(file: string): DB {

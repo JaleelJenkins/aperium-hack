@@ -57,14 +57,26 @@ export const INSIGHT_KINDS = [
 ] as const;
 export const ACTION_TYPES = ["draft_reply", "internal_task"] as const;
 
+/**
+ * Every Reason item carries a tmp_id, unique within one Reason response (s1, i1, a1...).
+ * Review answers by tmp_id rather than array position, so a skipped or reordered
+ * verdict can never attach to the wrong item.
+ */
+const TmpId = z.string().min(1);
+
 export const SignalOut = z.object({
+  tmp_id: TmpId,
   type: z.enum(SIGNAL_TYPES),
   text: z.string().min(1),
   due_at: z.string().nullable().default(null), // ISO date or datetime
+  // For relative dates ("next Friday"): which message/segment date the phrase was resolved
+  // against and how. A forwarded email's phrase resolves against the FORWARDED date (trap 2).
+  date_basis: z.string().nullable().default(null),
   evidence: EvidenceList,
 });
 
 export const InsightOut = z.object({
+  tmp_id: TmpId,
   kind: z.enum(INSIGHT_KINDS),
   severity: z.enum(["low", "medium", "high"]),
   text: z.string().min(1),
@@ -74,11 +86,13 @@ export const InsightOut = z.object({
 
 export const ActionOut = z.discriminatedUnion("type", [
   z.object({
+    tmp_id: TmpId,
     type: z.literal("draft_reply"),
     payload: z.object({ to: z.array(z.string().email()).min(1), subject: z.string(), body: z.string().min(1) }),
     evidence: EvidenceList,
   }),
   z.object({
+    tmp_id: TmpId,
     type: z.literal("internal_task"),
     payload: z.object({ title: z.string().min(1), notes: z.string().default("") }),
     evidence: EvidenceList,
@@ -99,6 +113,9 @@ export const ReasonOutput = z.object({
   }),
   project_summary: z.string().nullable().default(null), // updated running summary, if it changed
   signals: z.array(SignalOut).default([]),
+  // Ids of EXISTING open signals (from the project state Reason was given) that this
+  // message answers or fulfils; the pipeline marks them done.
+  closes_signal_ids: z.array(z.string()).default([]),
   insights: z.array(InsightOut).default([]),
   actions: z.array(ActionOut).default([]),
 });
@@ -108,16 +125,29 @@ export type ReasonOutput = z.infer<typeof ReasonOutput>;
 
 export const REVIEW_VERDICTS = ["pass", "revise", "block"] as const;
 
-/** Review sees each claim with its cited evidence resolved to text and returns one verdict per item. */
+/**
+ * Who stopped an item. "review" = the review model; "verify" = the deterministic
+ * evidence check (lib/evidence.ts); "policy" = a hard guard, e.g. an action addressed
+ * to someone outside the thread's known contacts. Reported separately on the scoreboard.
+ */
+export const BLOCKED_BY = ["review", "verify", "policy"] as const;
+export type BlockedBy = (typeof BLOCKED_BY)[number];
+
+/**
+ * Review sees each claim, its cited evidence AND the full source (every segment with
+ * its date, every PDF page), and returns one verdict per item. Seeing only the cited
+ * quote is not enough: "3 floors" is in the email, the contradiction is on PDF p.2.
+ */
 export const ReviewOutput = z.object({
   items: z.array(
     z.object({
-      target_type: z.enum(["signal", "insight", "action"]),
-      index: z.number().int().nonnegative(), // position in the Reason output array of that type
+      tmp_id: TmpId, // tmp_id of the reviewed signal, insight or action
       verdict: z.enum(REVIEW_VERDICTS),
       score: z.number().min(0).max(1),
-      reason: z.string().min(1), // one line; shown in "Caught by review"
+      reason: z.string().min(1), // one line; shown in "Caught by review". Name the location, e.g. "PDF p.2: Levels 1-2"
       revised_text: z.string().nullable().default(null), // for verdict = revise
+      // Evidence that contradicts the claim; "Caught by review" links to it.
+      conflicting_evidence: z.array(Evidence).default([]),
     }),
   ),
 });
