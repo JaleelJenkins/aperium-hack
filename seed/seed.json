@@ -1,23 +1,72 @@
 {
-  "_readme": "Demo seed (PRD: Demo script and seed data). Three fictional clients, five projects. Seed emails are sent from teammates' real addresses, so map each teammate address to a client under contacts. Replace every CHANGE_ME address before the demo; `npm run seed` warns while any remain.",
+  "_readme": "Demo seed (PRD: Demo script and seed data). Three fictional clients, five projects. The seed inbox (seed/emails.ts, npm run seed:inbox) uses the contacts below. Clients are matched by sender domain; free-mail senders (gmail.com) by contact address. Replace CHANGE_ME.live-demo with the teammate who sends the live email from their phone during the demo, then run npm run seed.",
   "clients": [
     {
       "id": "harbor-pine",
       "name": "Harbor & Pine Architects",
-      "domains": ["harborpine.com"],
-      "contacts": [{ "email": "CHANGE_ME.harbor@gmail.com", "name": "Harbor & Pine (teammate)" }]
+      "domains": [
+        "harborpine.com"
+      ],
+      "contacts": [
+        {
+          "email": "dana@harborpine.com",
+          "name": "Dana Whitfield"
+        },
+        {
+          "email": "marco.reyes@harborpine.com",
+          "name": "Marco Reyes"
+        },
+        {
+          "email": "ap@harborpine.com",
+          "name": "Lauren Kim (Accounts Payable)"
+        },
+        {
+          "email": "CHANGE_ME.live-demo@gmail.com",
+          "name": "Live demo sender (teammate's phone)"
+        }
+      ]
     },
     {
       "id": "vector-freight",
       "name": "Vector Freight",
-      "domains": ["vectorfreight.io"],
-      "contacts": [{ "email": "CHANGE_ME.vector@gmail.com", "name": "Vector Freight (teammate)" }]
+      "domains": [
+        "vectorfreight.io"
+      ],
+      "contacts": [
+        {
+          "email": "priya.nair@vectorfreight.io",
+          "name": "Priya Nair"
+        },
+        {
+          "email": "tom.becker@vectorfreight.io",
+          "name": "Tom Becker"
+        },
+        {
+          "email": "raj.patel@vectorfreight.io",
+          "name": "Raj Patel"
+        }
+      ]
     },
     {
       "id": "lumen-clinic",
       "name": "Lumen Clinic",
-      "domains": ["lumenclinic.com"],
-      "contacts": [{ "email": "CHANGE_ME.lumen@gmail.com", "name": "Lumen Clinic (teammate)" }]
+      "domains": [
+        "lumenclinic.com"
+      ],
+      "contacts": [
+        {
+          "email": "amara.okafor.md@gmail.com",
+          "name": "Dr. Amara Okafor"
+        },
+        {
+          "email": "kelly.tran@lumenclinic.com",
+          "name": "Kelly Tran"
+        },
+        {
+          "email": "billing@lumenclinic.com",
+          "name": "Lumen Clinic Billing"
+        }
+      ]
     }
   ],
   "projects": [
@@ -58,7 +107,10 @@
       "provider": "anthropic",
       "model_name": "claude-haiku-5-5",
       "label": "Claude Haiku 5.5 (fast)",
-      "stages": ["reason", "review"],
+      "stages": [
+        "reason",
+        "review"
+      ],
       "cost_in_per_mtok": 0.1,
       "cost_out_per_mtok": 0.5
     },
@@ -67,7 +119,10 @@
       "provider": "anthropic",
       "model_name": "claude-sonnet-5-5",
       "label": "Claude Sonnet 5.5",
-      "stages": ["reason", "review"],
+      "stages": [
+        "reason",
+        "review"
+      ],
       "cost_in_per_mtok": 2,
       "cost_out_per_mtok": 10
     },
@@ -76,14 +131,26 @@
       "provider": "anthropic",
       "model_name": "claude-opus-5-5",
       "label": "Claude Opus 5.5 (strong)",
-      "stages": ["reason", "review"],
+      "stages": [
+        "reason",
+        "review"
+      ],
       "cost_in_per_mtok": 4,
       "cost_out_per_mtok": 20
     }
   ],
-  "default_model_prefs": { "reason": "claude-sonnet", "review": "claude-opus" },
+  "default_model_prefs": {
+    "reason": "claude-sonnet",
+    "review": "claude-opus"
+  },
   "eval_pairs": [
-    { "reason": "claude-sonnet", "review": "claude-opus" },
-    { "reason": "claude-haiku", "review": "claude-sonnet" }
+    {
+      "reason": "claude-sonnet",
+      "review": "claude-opus"
+    },
+    {
+      "reason": "claude-haiku",
+      "review": "claude-sonnet"
+    }
   ]
 }

@@ -10,6 +10,8 @@
     "worker": "tsx worker/ingest.ts",
     "worker:once": "tsx worker/ingest.ts --once",
     "seed": "tsx scripts/seed.ts",
+    "seed:inbox": "tsx scripts/seed-inbox.ts",
+    "seed:labels": "tsx scripts/seed-labels.ts",
     "db:reset": "tsx scripts/db-reset.ts",
     "demo:ui": "tsx scripts/demo-ui.ts",
     "build": "next build",
