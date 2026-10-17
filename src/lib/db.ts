@@ -510,7 +510,10 @@ function migrate(db: DB): void {
   }
 }
 
-const g = globalThis as unknown as { __reasoningIntelligenceDb?: DB };
+const g = globalThis as unknown as {
+  __reasoningIntelligenceDb?: DB;
+  __reasoningIntelligenceDbVersion?: number;
+};
 
 /**
  * The DB file was renamed from client-pulse.db. If only the old file exists, move it
@@ -522,11 +525,15 @@ function adoptLegacyDb(dbPath: string): void {
   for (const ext of ["", "-wal", "-shm"]) if (fs.existsSync(legacy + ext)) fs.renameSync(legacy + ext, dbPath + ext);
 }
 
-/** Process-wide connection (survives Next.js dev hot reloads). */
+/** Process-wide connection (survives Next.js dev hot reloads and auto-migrates when new migrations arrive). */
 export function getDb(): DB {
   if (!g.__reasoningIntelligenceDb) {
     adoptLegacyDb(config.dbPath);
     g.__reasoningIntelligenceDb = openDb(config.dbPath);
+    g.__reasoningIntelligenceDbVersion = MIGRATIONS.length;
+  } else if (g.__reasoningIntelligenceDbVersion !== MIGRATIONS.length) {
+    migrate(g.__reasoningIntelligenceDb);
+    g.__reasoningIntelligenceDbVersion = MIGRATIONS.length;
   }
   return g.__reasoningIntelligenceDb;
 }

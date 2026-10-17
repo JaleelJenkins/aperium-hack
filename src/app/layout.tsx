@@ -49,7 +49,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               </NavLink>
               <NavLink href="/projects">
                 <Icon name="folder" size={15} />
-                Projects
+                Project Summaries
               </NavLink>
             </nav>
 
@@ -74,8 +74,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <Icon name="gauge" size={15} />
                 Model scoreboard
               </NavLink>
+            </nav>
+
+            <div className="side-label">Inboxes</div>
+            <nav className="side-nav inboxes">
               <NavLink href="/inbox">
-                <Icon name="mail" size={15} />
+                <Icon name="inbox" size={15} />
                 All mail
               </NavLink>
             </nav>

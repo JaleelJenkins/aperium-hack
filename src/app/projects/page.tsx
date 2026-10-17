@@ -27,10 +27,9 @@ export default async function ProjectsPage() {
       <div className="page-head">
         <div>
           <div className="eyebrow">Portfolio</div>
-          <h1>Projects</h1>
+          <h1>Project Summaries</h1>
           <div className="muted">
-            {total} projects across {clients.length} clients. Each new email thread is compared with its client&apos;s project
-            summaries and filed to the closest match; below 70% confidence it goes to a &ldquo;New project?&rdquo; card instead.
+            {total} active projects across {clients.length} clients · Incoming emails are auto-filed using these project summaries.
           </div>
         </div>
       </div>
@@ -56,7 +55,7 @@ export default async function ProjectsPage() {
             </div>
             {c.unfiledThreads > 0 && (
               <Link className="pill warn" href="/">
-                {c.unfiledThreads} thread{c.unfiledThreads === 1 ? "" : "s"} waiting on &ldquo;New project?&rdquo;
+                {c.unfiledThreads} unfiled thread{c.unfiledThreads === 1 ? "" : "s"}
               </Link>
             )}
           </div>
@@ -69,10 +68,13 @@ export default async function ProjectsPage() {
                   <span className={`health ${p.health}`}>{HEALTH_LABEL[p.health] ?? p.health}</span>
                 </header>
 
-                <div className="proj-label mono">Summary · used to file new mail</div>
                 <SummaryEditor projectId={p.id} summary={p.summary} />
 
                 <dl className="proj-stats">
+                  <div>
+                    <dt>Open items</dt>
+                    <dd className="mono">{p.openSignals}</dd>
+                  </div>
                   <div>
                     <dt>Threads</dt>
                     <dd className="mono">{p.threads}</dd>
@@ -86,10 +88,6 @@ export default async function ProjectsPage() {
                     <dd className="mono">{p.attachments}</dd>
                   </div>
                   <div>
-                    <dt>Open items</dt>
-                    <dd className="mono">{p.openSignals}</dd>
-                  </div>
-                  <div>
                     <dt>Last contact</dt>
                     <dd className="mono">{p.lastContactAt ? ago(p.lastContactAt) : "—"}</dd>
                   </div>
@@ -97,9 +95,9 @@ export default async function ProjectsPage() {
 
                 {p.recentThreads.length > 0 && (
                   <div className="proj-threads">
-                    <div className="proj-label mono">Recently filed</div>
+                    <div className="proj-label mono">Recent threads</div>
                     <ul>
-                      {p.recentThreads.map((t) => (
+                      {p.recentThreads.slice(0, 2).map((t) => (
                         <li key={t.id} title={t.reason ?? undefined}>
                           <Icon name="mail" size={12} />
                           <span className="proj-thread-subject">{t.subject || "(no subject)"}</span>
@@ -115,10 +113,10 @@ export default async function ProjectsPage() {
                 )}
 
                 <footer className="proj-foot">
-                  <Link href={`/#client-${c.id}`}>Open on board</Link>
+                  <Link href={`/#client-${c.id}`}>Open on board →</Link>
                   {p.routingPolicy && (
                     <span className="muted mono">
-                      Router: {POLICY_LABEL[p.routingPolicy as RoutingPolicyMode] ?? p.routingPolicy}
+                      {POLICY_LABEL[p.routingPolicy as RoutingPolicyMode] ?? p.routingPolicy}
                     </span>
                   )}
                 </footer>
