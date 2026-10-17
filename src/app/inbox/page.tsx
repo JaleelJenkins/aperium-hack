@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { getDb } from "@/lib/db";
 import { listAccounts } from "@/lib/gmail/client";
 import { ConnectionBanners, ConnectionControls, InboxStatus } from "../components/Connection";
@@ -94,9 +95,9 @@ export default async function InboxPage({
                     {e.sender_name && <div className="muted">{e.sender_email}</div>}
                   </td>
                   <td>
-                    <a className="subject" href={`/messages/${encodeURIComponent(e.id)}`}>
+                    <Link className="subject" href={`/messages/${encodeURIComponent(e.id)}`}>
                       {e.subject || "(no subject)"}
-                    </a>
+                    </Link>
                     <div className="snippet">{e.snippet}</div>
                   </td>
                   <td className="hide-sm">

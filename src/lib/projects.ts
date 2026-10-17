@@ -78,23 +78,49 @@ export function listProjects(db: DB): ClientProjects[] {
     attachments: number;
     open_signals: number;
   }[];
-  const recent = db.prepare(
-    `SELECT gmail_thread_id AS id, subject, assignment_confidence AS confidence, assigned_by AS assignedBy,
-            assignment_reason AS reason, last_message_at AS lastMessageAt
-       FROM threads WHERE project_id = ? ORDER BY last_message_at DESC LIMIT 4`,
-  );
-  const unfiled = db.prepare(
-    `SELECT COUNT(DISTINCT t.gmail_thread_id) AS n FROM threads t
-       JOIN actions a ON a.thread_id = t.gmail_thread_id AND a.type = 'new_project' AND a.status = 'proposed'
-      WHERE t.client_id = ? AND t.project_id IS NULL`,
-  );
+  const allRecent = db
+    .prepare(
+      `SELECT gmail_thread_id AS id, project_id, subject, assignment_confidence AS confidence, assigned_by AS assignedBy,
+              assignment_reason AS reason, last_message_at AS lastMessageAt
+         FROM (
+           SELECT gmail_thread_id, project_id, subject, assignment_confidence, assigned_by,
+                  assignment_reason, last_message_at,
+                  ROW_NUMBER() OVER (PARTITION BY project_id ORDER BY last_message_at DESC) as rn
+             FROM threads
+            WHERE project_id IS NOT NULL
+         ) WHERE rn <= 4`,
+    )
+    .all() as (FiledThread & { project_id: string })[];
+  const recentByProject = new Map<string, FiledThread[]>();
+  for (const t of allRecent) {
+    const list = recentByProject.get(t.project_id) ?? [];
+    list.push({
+      id: t.id,
+      subject: t.subject,
+      confidence: t.confidence,
+      assignedBy: t.assignedBy,
+      reason: t.reason,
+      lastMessageAt: t.lastMessageAt,
+    });
+    recentByProject.set(t.project_id, list);
+  }
+
+  const unfiledRows = db
+    .prepare(
+      `SELECT t.client_id, COUNT(DISTINCT t.gmail_thread_id) AS n FROM threads t
+         JOIN actions a ON a.thread_id = t.gmail_thread_id AND a.type = 'new_project' AND a.status = 'proposed'
+        WHERE t.client_id IS NOT NULL AND t.project_id IS NULL
+        GROUP BY t.client_id`,
+    )
+    .all() as { client_id: string; n: number }[];
+  const unfiledByClient = new Map(unfiledRows.map((r) => [r.client_id, r.n]));
 
   return clients.map((c) => ({
     id: c.id,
     name: c.name,
     domains: JSON.parse(c.domains_json) as string[],
     contacts: contacts.filter((ct) => ct.client_id === c.id && !/CHANGE_ME/i.test(ct.email)).map(({ email, name }) => ({ email, name })),
-    unfiledThreads: (unfiled.get(c.id) as { n: number }).n,
+    unfiledThreads: unfiledByClient.get(c.id) ?? 0,
     projects: projects
       .filter((p) => p.client_id === c.id)
       .map((p) => ({
@@ -109,7 +135,7 @@ export function listProjects(db: DB): ClientProjects[] {
         messages: p.messages,
         attachments: p.attachments,
         openSignals: p.open_signals,
-        recentThreads: recent.all(p.id) as FiledThread[],
+        recentThreads: recentByProject.get(p.id) ?? [],
       })),
   }));
 }

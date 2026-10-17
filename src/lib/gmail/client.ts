@@ -1,10 +1,17 @@
-import { google, type gmail_v1 } from "googleapis";
+import { createRequire } from "node:module";
+import type { Auth, gmail_v1 } from "googleapis";
 import { assertGoogleConfigured, config } from "../config";
 import { decrypt, encrypt } from "../crypto";
 import type { DB } from "../db";
 import { decodeBase64Url } from "../ingest/parse";
 
-export type OAuth2Client = InstanceType<typeof google.auth.OAuth2>;
+export type OAuth2Client = Auth.OAuth2Client;
+
+const require = createRequire(import.meta.url);
+let _google: typeof import("googleapis").google | undefined;
+function getGoogle() {
+  return (_google ??= (require("googleapis") as typeof import("googleapis")).google);
+}
 
 // readonly: ingest. compose: approved replies become drafts in the thread (never send).
 export const GMAIL_SCOPES = [
@@ -21,7 +28,8 @@ export const SEED_SCOPE = "https://www.googleapis.com/auth/gmail.insert";
 
 export function oauthClient(): OAuth2Client {
   assertGoogleConfigured();
-  return new google.auth.OAuth2(config.google.clientId, config.google.clientSecret, config.google.redirectUri);
+  const { auth } = getGoogle();
+  return new auth.OAuth2(config.google.clientId, config.google.clientSecret, config.google.redirectUri);
 }
 
 export interface GmailAccountRow {
@@ -124,7 +132,7 @@ export interface GmailApi {
 }
 
 export function gmailApi(auth: OAuth2Client): GmailApi {
-  const gmail = google.gmail({ version: "v1", auth });
+  const gmail = getGoogle().gmail({ version: "v1", auth });
   return {
     async getProfile() {
       const { data } = await gmail.users.getProfile({ userId: "me" });

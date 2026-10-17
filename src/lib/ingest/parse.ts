@@ -1,6 +1,12 @@
+import { createRequire } from "node:module";
 import type { gmail_v1 } from "googleapis";
-import { convert as htmlToText } from "html-to-text";
 import { cleanBody, normalize } from "./clean";
+
+const require = createRequire(import.meta.url);
+let _htmlToText: typeof import("html-to-text").convert | undefined;
+function getHtmlToText() {
+  return (_htmlToText ??= (require("html-to-text") as typeof import("html-to-text")).convert);
+}
 
 export type GmailMessage = gmail_v1.Schema$Message;
 type Part = gmail_v1.Schema$MessagePart;
@@ -182,7 +188,7 @@ function decodeText(part: Part): string {
 }
 
 function htmlToPlain(html: string): string {
-  return htmlToText(html, {
+  return getHtmlToText()(html, {
     wordwrap: false,
     selectors: [
       { selector: "a", options: { ignoreHref: true } },

@@ -440,7 +440,14 @@ const MIGRATIONS: string[] = [
   ALTER TABLE pipeline_runs ADD COLUMN review_trace TEXT;   -- Review model's notes on the items
   `,
 
-  /* 009: link the audit trail to the exact Gmail draft */ `
+  /* 009: Composite indexes for dashboard queries and review rules */ `
+  CREATE INDEX IF NOT EXISTS review_rules_enabled_idx ON review_rules(enabled);
+  CREATE INDEX IF NOT EXISTS actions_status_created_idx ON actions(status, created_at);
+  CREATE INDEX IF NOT EXISTS messages_status_rec_idx ON messages(status, received_at DESC);
+  CREATE INDEX IF NOT EXISTS threads_proj_last_idx ON threads(project_id, last_message_at DESC);
+  `,
+
+  /* 010: link the audit trail to the exact Gmail draft */ `
   ALTER TABLE actions ADD COLUMN gmail_draft_message_id TEXT;  -- opens the draft in Gmail
   ALTER TABLE actions ADD COLUMN executed_at TEXT;
   `,

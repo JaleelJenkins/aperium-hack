@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { getDb } from "@/lib/db";
 import { listProjects } from "@/lib/projects";
 import { POLICY_LABEL, type RoutingPolicyMode } from "@/lib/router/types";
@@ -54,9 +55,9 @@ export default async function ProjectsPage() {
               </div>
             </div>
             {c.unfiledThreads > 0 && (
-              <a className="pill warn" href="/">
+              <Link className="pill warn" href="/">
                 {c.unfiledThreads} thread{c.unfiledThreads === 1 ? "" : "s"} waiting on &ldquo;New project?&rdquo;
-              </a>
+              </Link>
             )}
           </div>
 
@@ -114,7 +115,7 @@ export default async function ProjectsPage() {
                 )}
 
                 <footer className="proj-foot">
-                  <a href={`/#client-${c.id}`}>Open on board</a>
+                  <Link href={`/#client-${c.id}`}>Open on board</Link>
                   {p.routingPolicy && (
                     <span className="muted mono">
                       Router: {POLICY_LABEL[p.routingPolicy as RoutingPolicyMode] ?? p.routingPolicy}

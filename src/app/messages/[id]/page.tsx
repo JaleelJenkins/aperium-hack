@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getDb } from "@/lib/db";
 import type { Address } from "@/lib/ingest/parse";
@@ -62,9 +63,9 @@ export default async function MessagePage({ params }: { params: Promise<{ id: st
 
   return (
     <>
-      <a href="/" className="muted back">
+      <Link href="/" className="muted back">
         ← Board
-      </a>
+      </Link>
       <h1 style={{ marginTop: 8 }}>{email.subject || "(no subject)"}</h1>
       <dl className="meta">
         <dt>From</dt>

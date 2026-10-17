@@ -331,22 +331,54 @@ export function getBoard(db: DB, opts: { filter?: BoardFilter; now?: number } = 
     .all() as ActionRow[];
 
   // Mail not yet through the pipeline, plus everything on unassigned threads.
-  // guessed_client: sender's contact or domain match, so triage cards say who it's probably from.
-  const mail = db
+  // guessed_client: sender's contact or domain match, resolved in JS to avoid correlated json_each subqueries.
+  const clientDomains: { domain: string; name: string }[] = [];
+  const clientNameById = new Map<string, string>();
+  for (const p of projects) {
+    if (!clientNameById.has(p.client_id)) {
+      clientNameById.set(p.client_id, p.client_name);
+      try {
+        const arr = JSON.parse(p.domains_json);
+        if (Array.isArray(arr)) {
+          for (const d of arr) if (typeof d === "string") clientDomains.push({ domain: d.toLowerCase(), name: p.client_name });
+        }
+      } catch {}
+    }
+  }
+  const contactMap = new Map<string, string>();
+  const contactsList = db.prepare(`SELECT email, client_id FROM contacts`).all() as { email: string; client_id: string }[];
+  for (const c of contactsList) {
+    const name = clientNameById.get(c.client_id);
+    if (name) contactMap.set(c.email.toLowerCase(), name);
+  }
+
+  const rawMail = db
     .prepare(
       `SELECT m.gmail_message_id AS id, t.project_id, m.sender_name, m.sender_email, m.subject, m.status, m.error,
-              m.received_at,
-              COALESCE(
-                (SELECT cl.name FROM contacts ct JOIN clients cl ON cl.id = ct.client_id WHERE ct.email = lower(m.sender_email)),
-                (SELECT cl.name FROM clients cl, json_each(cl.domains_json) d
-                  WHERE lower(m.sender_email) LIKE '%@' || d.value)
-              ) AS guessed_client
+              m.received_at
          FROM messages m JOIN threads t ON t.gmail_thread_id = m.thread_id
         WHERE m.status != 'dismissed' AND (t.project_id IS NULL OR m.status != 'reviewed')
         ORDER BY m.received_at DESC
         LIMIT 300`,
     )
-    .all() as MailRow[];
+    .all() as Omit<MailRow, "guessed_client">[];
+
+  const mail: MailRow[] = rawMail.map((m) => {
+    let guessed: string | null = null;
+    if (m.sender_email) {
+      const em = m.sender_email.toLowerCase();
+      guessed = contactMap.get(em) ?? null;
+      if (!guessed) {
+        for (const cd of clientDomains) {
+          if (em.endsWith("@" + cd.domain)) {
+            guessed = cd.name;
+            break;
+          }
+        }
+      }
+    }
+    return { ...m, guessed_client: guessed };
+  });
 
   const blockedByProject = new Map(
     (
@@ -599,7 +631,7 @@ export function getBoard(db: DB, opts: { filter?: BoardFilter; now?: number } = 
  * rather than calling getBoard() to avoid loading all signals/actions/mail
  * just to render the nav dots.
  */
-export function listClientsForNav(db: DB, now = Date.now()): { id: string; name: string; projects: number; health: Health }[] {
+export const listClientsForNav = cache((db: DB, now = Date.now()): { id: string; name: string; projects: number; health: Health }[] => {
   const nowIso = new Date(now).toISOString();
   const rows = db
     .prepare(
@@ -639,7 +671,7 @@ export function listClientsForNav(db: DB, now = Date.now()): { id: string; name:
     )
     .all(nowIso, nowIso) as { id: string; name: string; projects: number; health: Health }[];
   return rows;
-}
+});
 
 /**
  * Route trace per message: a decision the pipeline recorded at ingest wins; otherwise route live

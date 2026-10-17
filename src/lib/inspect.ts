@@ -3,6 +3,7 @@
  * shows for one card, plus the "Caught by review" vault of blocked claims.
  * One click on a card opens this; the source is visible without leaving the board.
  */
+import { cache } from "react";
 import type { DB } from "./db";
 import type { Evidence } from "./contracts";
 import { attachmentNames, evidenceLinkFor, modelNames, routeResolver, ticketKeys, type CardKind, type EvidenceLink, type RouteTrace } from "./board";
@@ -351,9 +352,9 @@ export function caughtClaims(db: DB): CaughtClaim[] {
   });
 }
 
-export function caughtCount(db: DB): number {
+export const caughtCount = cache((db: DB): number => {
   return (db.prepare(`SELECT COUNT(*) AS n FROM model_reviews WHERE verdict = 'block'`).get() as { n: number }).n;
-}
+});
 
 function approvalInfo(
   db: DB,
