@@ -62,7 +62,10 @@ Each stage picks up `messages.status` from the previous one: `ingested → extra
 | | Activity & audit feed | P1 | ⬜ | |
 | **F7 Review & eval** | Output + review contracts | P0 | ✅ | `src/lib/contracts.ts` |
 | | Server drops AI items without valid evidence | P0 | ✅ | `src/lib/evidence.ts` → `keepSupported()` |
-| | Model profiles + per-stage user choice | P0 | ✅ data, ⬜ wire into pipeline | `model_profiles`, `user_model_prefs` |
+| | Reason: one call per email; verify drops unquoted claims and past deadlines; policy blocks actions to unknown addresses | P0 | ✅ | `src/lib/pipeline/reason.ts` |
+| | Review: one batched call over the full source; pass / revise / block; stores items, logs every verdict, latency and cost | P0 | ✅ | `src/lib/pipeline/review.ts` |
+| | Provider-agnostic model layer: Anthropic and/or OpenRouter, routed per model | P0 | ✅ | `src/lib/pipeline/{llm,models,openrouter}.ts` |
+| | Model profiles + per-stage user choice | P0 | ✅ router picks the pair per email, ⬜ `user_model_prefs` not read | `model_profiles`, `user_model_prefs` |
 | | Reason × Review pair router: per-project policy (seeded per client), escalation on payload risk, promote/pin, route trace on cards | P0 | ✅ | `src/lib/router/pairRouter.ts`, `store.ts` |
 | | Labeled seed set | P0 | ✅ | `seed/emails.ts`, `npm run seed:inbox` |
 | | Eval runner | P0 | ⬜ labels ready. Runner writes `eval_runs.metrics_json` per `EvalRunMetrics` (`src/lib/router/store.ts`); the scoreboard swaps the illustrative row for the measured one | `seed/labels.json`, `data/seed-run.json`, `eval_runs` |
@@ -91,7 +94,7 @@ npm install
 npm run setup
 ```
 
-**3. Fill in `.env.local`:** `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` (see [Google Cloud](#google-cloud-once-5-min) below), and `ANTHROPIC_API_KEY` for the AI stages.
+**3. Fill in `.env.local`:** `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` (see [Google Cloud](#google-cloud-once-5-min) below), and `ANTHROPIC_API_KEY` or `OPENROUTER_API_KEY` (either works, both is fine) for the AI stages.
 
 **4. Run the app and the worker in two terminals.** Both keep running; stop them with Ctrl+C.
 
@@ -127,7 +130,10 @@ npm run worker
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Gmail | OAuth client (Web application) |
 | `GOOGLE_REDIRECT_URI` | Gmail | default `http://localhost:3000/api/auth/google/callback` |
 | `TOKEN_ENCRYPTION_KEY` | Gmail | 32 bytes, base64 or hex: `openssl rand -base64 32` |
-| `ANTHROPIC_API_KEY` | Extract, Resolve, Reason, Review | Without it, Extract is skipped and Resolve falls back to word overlap |
+| `ANTHROPIC_API_KEY` | Extract, Resolve, Reason, Review | Claude direct. Without it or `OPENROUTER_API_KEY`, Extract, Reason and Review are skipped and Resolve falls back to word overlap |
+| `OPENROUTER_API_KEY` | same stages | One key for every vendor through [OpenRouter](https://openrouter.ai/keys). Claude models use it when `ANTHROPIC_API_KEY` is empty |
+| `LLM_PROVIDER` | model layer | `auto` (default: Anthropic for Claude when its key is set, else OpenRouter), `anthropic`, or `openrouter` (everything through OpenRouter) |
+| `OPENROUTER_MODEL_GEMINI_FLASH` | router pair `flash-haiku` | an OpenRouter model id; until set, that pair is unavailable to the router |
 | `EXTRACT_MODEL`, `RESOLVE_MODEL` | Extract, Resolve | defaults `claude-sonnet-5-5`, `claude-haiku-5-5` |
 | `LIVE_DEMO_SENDER` | live demo | the teammate's phone address; `npm run seed` maps it to Harbor & Pine in place of `CHANGE_ME.live-demo` |
 | `DATA_DIR` | storage | SQLite DB + attachments, default `./data` (gitignored) |
@@ -237,6 +243,43 @@ The worker runs both stages after every poll. `npm run pipeline` runs them once 
 
 On the seed inbox, all 15 emails are filed to their labeled project, at 0.88–0.99 confidence even with the offline word-overlap fallback.
 
+## Reason and Review
+
+The worker runs both after Resolve, on every poll; `npm run pipeline` runs them once. Status moves `resolved → reasoned → reviewed`, and a message stays in Triage until it is `reviewed`. Mail on a thread still waiting on a "New project?" decision isn't reasoned until it's filed.
+
+**Pair per email.** The router (`src/lib/router`) picks the Reason → Review pair from the project's policy and the email's risk signals (PDF attached, billing or scope words, unknown sender, a relative date in forwarded text). Each choice is logged in `route_decisions`.
+
+**Reason** (`src/lib/pipeline/reason.ts`): one call per email. It gets the message with its sent date, earlier messages in the thread, every PDF page and image text with their ids, the client's projects, this project's open items and the known contacts. It returns signals, insights and proposed actions per `src/lib/contracts.ts`. Then deterministic checks run before anything is reviewed:
+- **verify:** an item whose quote isn't in the stored source, or that cites a source outside this email, is dropped;
+- **verify:** a deadline that has already passed is blocked (trap 2, the stale "next Friday");
+- **policy:** a draft addressed to, or a task that sends mail to, anyone outside the thread's known contacts is blocked (trap 4, the invoice redirect).
+
+**Review** (`src/lib/pipeline/review.ts`): one batched call per email that sees the full source, not just the cited quote. That's what catches trap 1: "three floors" really is in the email, but PDF p.2 scopes Levels 1-2. Each item gets `pass`, `revise` (stored with the corrected text; Reason's text is kept in `original_text`) or `block`. An item the reviewer skips counts as blocked.
+
+**Storage:** passed and revised items go to `signals`, `insights` and `actions` with the producer and reviewer models, score and reason. Every verdict goes to `model_reviews`; blocks (by `review`, `verify` or `policy`) feed **Caught by review** with links to the contradicting page. `pipeline_runs` records the pair, tokens, cost (OpenRouter's reported cost, else list prices) and latency from Gmail receipt to stored. Reason's verified output is kept until Review succeeds, so a failed Review retries without paying for Reason again; after 3 failures the message is marked `failed`.
+
+**Model layer** (`src/lib/pipeline/llm.ts`, `models.ts`, `openrouter.ts`). Stages call one `Llm` interface with a forced tool, and name models by router profile (`claude-haiku`, `claude-sonnet`, `claude-opus`, `gemini-flash`) or Claude API id. Each call goes to Anthropic or to OpenRouter's OpenAI-compatible API (PDFs as file parts, images as data URLs) depending on which keys are set and `LLM_PROVIDER`. With OpenRouter, a second vendor (e.g. a Gemini Flash reasoner) is one env var away.
+
+To add an OpenRouter key:
+
+```bash
+cd ~/aperium-hack
+```
+
+```bash
+read -s "KEY?Paste your OpenRouter key: "
+```
+
+```bash
+echo "OPENROUTER_API_KEY=$KEY" >> .env.local
+```
+
+Then run the pipeline once to process what's waiting:
+
+```bash
+npm run pipeline
+```
+
 ## Scripts
 
 | Command | What it does |
@@ -244,8 +287,8 @@ On the seed inbox, all 15 emails are filed to their labeled project, at 0.88–0
 | `npm run setup` | Create `.env.local`, generate the token key, load seed data (safe to re-run) |
 | `npm run dev` | Dashboard and API routes on http://localhost:3000 |
 | `npm run worker` | Ingest loop; seeds an empty database on first start |
-| `npm run worker:once` | One ingest pass (plus Extract and Resolve), then exit |
-| `npm run pipeline` | Run Extract and Resolve over everything waiting, without polling Gmail |
+| `npm run worker:once` | One ingest pass (plus the pipeline), then exit |
+| `npm run pipeline` | Run Extract, Resolve, Reason and Review over everything waiting, without polling Gmail |
 | `npm run seed` | Re-apply `seed/seed.json` after editing it |
 | `npm run seed -- --summaries` | Also overwrite project summaries with the seed versions |
 | `npm run seed:inbox` | Put the 15 demo emails into the connected inbox (`-- --dry-run` to preview) |

@@ -388,6 +388,16 @@ const MIGRATIONS: string[] = [
   ALTER TABLE threads ADD COLUMN assigned_by       TEXT;  -- model id | rule | human
   ALTER TABLE threads ADD COLUMN assignment_reason TEXT;  -- one line, shown on the card
   `,
+
+  /* 005: Reason + Review stages. Reason's verified output waits here for Review, so a
+     failed Review retries without paying for Reason again. */ `
+  ALTER TABLE pipeline_runs ADD COLUMN pair_id     TEXT;     -- router pair, e.g. haiku-sonnet
+  ALTER TABLE pipeline_runs ADD COLUMN stage       TEXT;     -- reasoned | reviewed | failed
+  ALTER TABLE pipeline_runs ADD COLUMN reason_json TEXT;     -- verified Reason output awaiting Review
+  ALTER TABLE pipeline_runs ADD COLUMN reason_ms   INTEGER;
+  ALTER TABLE pipeline_runs ADD COLUMN review_ms   INTEGER;
+  ALTER TABLE pipeline_runs ADD COLUMN provider    TEXT;     -- anthropic | openrouter | mixed
+  `,
 ];
 
 export function openDb(file: string): DB {
