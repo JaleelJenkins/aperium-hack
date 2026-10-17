@@ -379,68 +379,9 @@ export function getBoard(db: DB, opts: { filter?: BoardFilter; now?: number } = 
   const keys = ticketKeys(db);
   const model = modelNames(db);
 
-  // Routing: a decision the pipeline recorded at ingest wins; otherwise route live under current policies,
-  // so a policy change or a promoted pair shows up on the board immediately.
   const routerSettings = getRouterSettings(db);
-  const leaderboard = getLeaderboard(db);
-  const pairById = new Map(leaderboard.map((p) => [p.id, p]));
-  // Pre-load all pipeline route decisions in one query; fall back to live routing only for
-  // messages that have no recorded decision (much rarer than iterating every card).
-  const recordedDecisions = new Map(
-    (db
-      .prepare(
-        `SELECT message_id, policy, pair_id, escalated, triggers_json, reason, est_cost_usd, est_latency_ms
-           FROM route_decisions WHERE source = 'pipeline'
-           GROUP BY message_id HAVING MAX(at)`,
-      )
-      .all() as {
-      message_id: string; policy: RoutingPolicyMode; pair_id: string; escalated: number;
-      triggers_json: string; reason: string; est_cost_usd: number; est_latency_ms: number;
-    }[]).map((r) => [r.message_id, r]),
-  );
-  const routes = new Map<string, RouteTrace | null>();
-  const routeFor = (messageId: string | null): RouteTrace | null => {
-    if (!messageId) return null;
-    if (routes.has(messageId)) return routes.get(messageId)!;
-    let trace: RouteTrace | null = null;
-    const r = recordedDecisions.get(messageId);
-    if (r) {
-      const p = pairById.get(r.pair_id);
-      trace = {
-        pairId: r.pair_id,
-        pairLabel: p?.label ?? r.pair_id,
-        pairShort: p ? `${modelFamily(p.reasonModel)} → ${modelFamily(p.reviewModel)}` : r.pair_id,
-        policy: r.policy,
-        escalated: r.escalated === 1,
-        triggers: parseStrings(r.triggers_json),
-        reason: r.reason,
-        estCostUsd: r.est_cost_usd,
-        estLatencyMs: r.est_latency_ms,
-        recorded: true,
-        illustrative: p?.source === "illustrative",
-      };
-    } else {
-      const d = routeMessage(db, messageId, leaderboard, routerSettings);
-      if (d) {
-        const p = d.selectedPair;
-        trace = {
-          pairId: p.id,
-          pairLabel: p.label,
-          pairShort: `${modelFamily(p.reasonModel)} → ${modelFamily(p.reviewModel)}`,
-          policy: d.policyApplied,
-          escalated: d.wasEscalated,
-          triggers: d.escalationTriggers,
-          reason: d.routingReason,
-          estCostUsd: d.estimatedCostUsd,
-          estLatencyMs: d.estimatedLatencyMs,
-          recorded: false,
-          illustrative: p.source === "illustrative",
-        };
-      }
-    }
-    routes.set(messageId, trace);
-    return trace;
-  };
+  // One query for every recorded decision; live routing only for messages without one.
+  const routeFor = routeResolver(db, { preloadAll: true, settings: routerSettings });
 
   // Bulk-load routing overrides for all projects in one query to avoid N+1 DB round-trips.
   const routingOverrides = new Map(
@@ -698,4 +639,83 @@ export function listClientsForNav(db: DB, now = Date.now()): { id: string; name:
     )
     .all(nowIso, nowIso) as { id: string; name: string; projects: number; health: Health }[];
   return rows;
+}
+
+/**
+ * Route trace per message: a decision the pipeline recorded at ingest wins; otherwise route live
+ * under current policies. Shared by the board cards and the evidence drawer.
+ */
+type RecordedRoute = {
+  message_id: string; policy: RoutingPolicyMode; pair_id: string; escalated: number;
+  triggers_json: string; reason: string; est_cost_usd: number; est_latency_ms: number;
+};
+
+export function routeResolver(
+  db: DB,
+  opts: { preloadAll?: boolean; settings?: ReturnType<typeof getRouterSettings> } = {},
+): (messageId: string | null) => RouteTrace | null {
+  // Routing: a decision the pipeline recorded at ingest wins; otherwise route live under current policies,
+  // so a policy change or a promoted pair shows up on the board immediately.
+  const routerSettings = opts.settings ?? getRouterSettings(db);
+  const leaderboard = getLeaderboard(db);
+  const pairById = new Map(leaderboard.map((p) => [p.id, p]));
+  // Board: pre-load every recorded decision in one query. Drawer: look up one message at a time.
+  const preloaded = opts.preloadAll
+    ? new Map(
+        (db
+          .prepare(
+            `SELECT message_id, policy, pair_id, escalated, triggers_json, reason, est_cost_usd, est_latency_ms
+               FROM route_decisions WHERE source = 'pipeline'
+               GROUP BY message_id HAVING MAX(at)`,
+          )
+          .all() as RecordedRoute[]).map((r) => [r.message_id, r]),
+      )
+    : null;
+  const one = db.prepare(
+    `SELECT message_id, policy, pair_id, escalated, triggers_json, reason, est_cost_usd, est_latency_ms FROM route_decisions
+      WHERE message_id = ? AND source = 'pipeline' ORDER BY at DESC LIMIT 1`,
+  );
+  const routes = new Map<string, RouteTrace | null>();
+  return (messageId: string | null): RouteTrace | null => {
+    if (!messageId) return null;
+    if (routes.has(messageId)) return routes.get(messageId)!;
+    let trace: RouteTrace | null = null;
+    const r = preloaded ? preloaded.get(messageId) : (one.get(messageId) as RecordedRoute | undefined);
+    if (r) {
+      const p = pairById.get(r.pair_id);
+      trace = {
+        pairId: r.pair_id,
+        pairLabel: p?.label ?? r.pair_id,
+        pairShort: p ? `${modelFamily(p.reasonModel)} → ${modelFamily(p.reviewModel)}` : r.pair_id,
+        policy: r.policy,
+        escalated: r.escalated === 1,
+        triggers: parseStrings(r.triggers_json),
+        reason: r.reason,
+        estCostUsd: r.est_cost_usd,
+        estLatencyMs: r.est_latency_ms,
+        recorded: true,
+        illustrative: p?.source === "illustrative",
+      };
+    } else {
+      const d = routeMessage(db, messageId, leaderboard, routerSettings);
+      if (d) {
+        const p = d.selectedPair;
+        trace = {
+          pairId: p.id,
+          pairLabel: p.label,
+          pairShort: `${modelFamily(p.reasonModel)} → ${modelFamily(p.reviewModel)}`,
+          policy: d.policyApplied,
+          escalated: d.wasEscalated,
+          triggers: d.escalationTriggers,
+          reason: d.routingReason,
+          estCostUsd: d.estimatedCostUsd,
+          estLatencyMs: d.estimatedLatencyMs,
+          recorded: false,
+          illustrative: p.source === "illustrative",
+        };
+      }
+    }
+    routes.set(messageId, trace);
+    return trace;
+  };
 }
