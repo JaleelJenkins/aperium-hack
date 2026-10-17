@@ -11,8 +11,8 @@
  * write to the real DB is one eval_runs row per pair.
  *
  * Metrics (all deterministic: no LLM judge):
- *   raw_reason_accuracy  share of emails where Reason's project_match names the labeled
- *                        project AND Reason's own output carries no trap claim
+ *   raw_reason_accuracy  share of emails filed to the labeled project (Resolve) whose Reason
+ *                        output, before verify and review, carries no trap claim
  *   verified_accuracy    share where the email ends up filed to the labeled project AND
  *                        nothing shown for it carries a trap claim (what the board shows)
  *   signal_recall        labeled asks + deadlines found among the shown signals
@@ -218,9 +218,17 @@ export function overlap(label: string, candidate: string): number {
 
 const NEGATION = /\b(not|no|never|un|without|pending|awaiting|yet to be|hasn't|has not|isn't|is not|wasn't|was not)\b[^.]{0,25}$/;
 
-/** True when a trap keyword appears un-negated ("approved", not "not yet approved"). */
+/**
+ * Text that names the trap's claim in order to contradict it ("the email says three floors,
+ * but the plan marks Level 3 out of scope") is the catch, not the leak.
+ */
+const REBUTTAL =
+  /\b(contradict\w*|conflict\w*|mismatch\w*|discrepan\w*|inconsisten\w*|not in scope|out of scope|unconfirmed|unverified)\b|\bbut\b[^.]{0,120}\b(not|no|only|out of)\b/;
+
+/** True when a trap keyword appears as a claim: not negated ("not yet approved"), not rebutted. */
 export function claimsKeyword(text: string, keywords: string[]): boolean {
   const t = text.toLowerCase();
+  if (REBUTTAL.test(t)) return false;
   for (const k of keywords) {
     let i = t.indexOf(k.toLowerCase());
     while (i >= 0) {
@@ -376,7 +384,9 @@ function scoreEmail(db: DB, email: SeedEmail, messageId: string | null, records:
   const shown = shownItems(db, messageId);
   const rawOffenders = trapOffenders(db, email, messageId, raw);
   const shownOffenders = trapOffenders(db, email, messageId, shown);
-  base.raw_correct = base.reason_project === email.labels.project_id && rawOffenders.length === 0 && !!reasonOut;
+  // Reason doesn't pick the project (Resolve files the thread first), so both accuracies use the
+  // filed project; the gap between them is what verify, policy and review removed.
+  base.raw_correct = base.filed_project === email.labels.project_id && rawOffenders.length === 0 && !!reasonOut;
   base.verified_correct = base.filed_project === email.labels.project_id && shownOffenders.length === 0 && m.status === "reviewed";
 
   // Recall: each labeled ask / deadline needs a shown signal that says the same thing.

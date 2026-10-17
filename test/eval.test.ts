@@ -96,6 +96,11 @@ describe("eval scoring helpers", () => {
     expect(claimsKeyword("Quote is not yet approved; partners review it Thursday", k)).toBe(false);
     expect(claimsKeyword("Quote unapproved, pending signature", k)).toBe(false);
     expect(claimsKeyword("No acceptance yet, though the scope was accepted last week", k)).toBe(true);
+    // Naming the claim to contradict it is the catch, not a leak (TRAP-01 as Haiku wrote it).
+    const floors = ["all three floors", "three floors"];
+    expect(claimsKeyword("Email asks for lighting across all three floors, but the drawing says Level 3 is not in scope", floors)).toBe(false);
+    expect(claimsKeyword("Scope conflict: email says three floors, PDF p.2 says Levels 1-2", floors)).toBe(false);
+    expect(claimsKeyword("Send Dana a lighting concept for all three floors", floors)).toBe(true);
   });
 });
 
@@ -131,7 +136,7 @@ describe("eval runner", () => {
     expect(m.trap_matrix["TRAP-04"].outcome).toBe("AVOIDED");
     expect(m.traps_caught).toBe(4);
     const filedRight = r.emails.filter((e) => e.filed_project === e.expected_project).length;
-    expect(m.raw_reason_accuracy).toBeCloseTo(13 / 15, 3);
+    expect(m.raw_reason_accuracy).toBeCloseTo((filedRight - 2) / 15, 3); // two trap claims before review
     expect(m.verified_accuracy).toBeCloseTo(filedRight / 15, 3);
     // Three labeled items found (two asks + the deadline on harbor-01) out of all labeled.
     const labeled = r.emails.reduce((n, e) => n + e.labeled, 0);
