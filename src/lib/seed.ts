@@ -141,13 +141,14 @@ export function applySeed(db: DB, seed: SeedFile, opts: { overwriteSummaries?: b
 /**
  * Back to a clean demo state: wipe pipeline output and AI-proposed projects,
  * restore seeded projects, keep the Gmail connection and model preferences.
+ * Measured eval runs survive: they cost real model calls and don't depend on the inbox.
  */
 export function resetToSeed(db: DB, seed: SeedFile, opts: { disconnect?: boolean } = {}): string[] {
   const seededProjects = seed.projects.map((p) => p.id);
   db.transaction(() => {
     db.exec(`DELETE FROM route_decisions; DELETE FROM route_runs; DELETE FROM pipeline_runs; DELETE FROM model_reviews; DELETE FROM actions; DELETE FROM insights; DELETE FROM signals;
              DELETE FROM attachments; DELETE FROM messages; DELETE FROM threads;
-             DELETE FROM eval_runs; DELETE FROM audit_events;`);
+             DELETE FROM audit_events;`);
     db.prepare(`DELETE FROM projects WHERE id NOT IN (${seededProjects.map(() => "?").join(",")})`).run(...seededProjects);
     db.exec(`UPDATE projects SET health = 'on_track', status = 'active', sentiment_trend = NULL, last_contact_at = NULL;`);
     if (opts.disconnect) db.exec(`DELETE FROM gmail_accounts;`);

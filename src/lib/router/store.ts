@@ -137,7 +137,7 @@ function measuredRows(db: DB): Map<string, SeedRow & { source: "measured"; measu
     out.set(id, {
       id,
       reasonModel: r.reason_profile_id as ModelId,
-      reviewModel: r.review_profile_id as ModelId,
+      reviewModel: r.review_profile_id === "none" ? null : (r.review_profile_id as ModelId),
       rawReasonAccuracy: m.raw_reason_accuracy!,
       verifiedAccuracy: m.verified_accuracy!,
       signalRecall: m.signal_recall!,

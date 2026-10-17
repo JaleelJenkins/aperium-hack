@@ -4,6 +4,7 @@
  *   Resolve  -> resolved             (file the thread to a project)
  *   Reason   resolved -> reasoned    (signals, insights, actions + verify/policy checks)
  *   Review   reasoned -> reviewed    (second model over the full source; store)
+ *   Insights deterministic rules over open signals + project health (no model, always runs)
  * Called by the worker after every poll, and by `npm run pipeline`. Headless: no
  * UI involved, and every model call goes through the provider-agnostic Llm
  * (Anthropic and/or OpenRouter, see llm.ts / models.ts).
@@ -11,6 +12,7 @@
 import type { DB } from "../db";
 import { claudeExtractor, runExtract, type ExtractResult, type Extractor } from "./extract";
 import { hasApiKey, pipelineLlm } from "./llm";
+import { runInsights, type InsightsResult } from "./insights";
 import { claudeMatcher, heuristicMatcher, runResolve, type Matcher, type ResolveResult } from "./resolve";
 import { runReasonReview, type ReasonReviewDeps, type ReasonReviewResult } from "./review";
 
@@ -32,12 +34,13 @@ export interface PipelineResult {
   extract: ExtractResult | null;
   resolve: ResolveResult;
   reasonReview: ReasonReviewResult | null;
+  insights: InsightsResult;
 }
 
 /** How many emails go through the pipeline at once (each is a few model calls). */
 export const PIPELINE_CONCURRENCY = Math.max(1, Number(process.env.PIPELINE_CONCURRENCY) || 4);
 
-const emptyResult = (deps: PipelineDeps): PipelineResult => ({
+const emptyResult = (deps: PipelineDeps): Omit<PipelineResult, "insights"> & { insights?: InsightsResult } => ({
   extract: deps.extractor ? { messages: 0, attachments: 0, failed: [] } : null,
   resolve: { assigned: [], inherited: 0, cards: [], failed: [] },
   reasonReview: deps.reasonReview ? { reasoned: 0, reviewed: 0, failed: [], perMessage: [] } : null,
@@ -100,7 +103,9 @@ export async function runPipeline(
     }
   });
   await Promise.all(workers);
-  return out;
+  // Deterministic insight rules and project health over everything stored (no model call).
+  const insights = runInsights(db, { now: opts.now });
+  return { ...out, insights };
 }
 
 export function describe(r: PipelineResult): string[] {
@@ -138,6 +143,13 @@ export function describe(r: PipelineResult): string[] {
           (m.latency_ms != null ? ` · ${(m.latency_ms / 1000).toFixed(1)}s since received` : ""),
       );
     }
+  }
+  const ins = r.insights;
+  if (ins.opened || ins.resolved || ins.health.length) {
+    out.push(
+      `insights: ${ins.opened} opened, ${ins.resolved} resolved` +
+        (ins.health.length ? ` · health ${ins.health.map((h) => `${h.project} ${h.from}->${h.to}`).join(", ")}` : ""),
+    );
   }
   return out;
 }

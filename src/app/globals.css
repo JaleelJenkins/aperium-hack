@@ -77,6 +77,7 @@
   --k-draft: #1d4ed8;
   --k-task: #44474f;
   --k-new: #d94e34;
+  --k-insight: #be123c;
 }
 
 /* -------------------------------------------------------------------- base */
@@ -370,6 +371,15 @@ main:has(.board-page) { max-width: none; margin: 0; padding: 24px 28px 48px; }
 .kind-draft_reply { --k: var(--k-draft); }
 .kind-internal_task { --k: var(--k-task); }
 .kind-new_project { --k: var(--k-new); }
+.kind-insight { --k: var(--k-insight); }
+.card.kind-insight { border-left: 3px solid var(--k-insight); }
+.sev {
+  display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: 4px;
+  font-family: var(--mono); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; border: 1px solid;
+}
+.sev-high { color: var(--status-block-text); background: var(--status-block-bg); border-color: var(--status-block-border); }
+.sev-medium { color: var(--status-risk-text); background: var(--status-risk-bg); border-color: var(--status-risk-border); }
+.sev-low { color: var(--status-pass-text); background: var(--status-pass-bg); border-color: var(--status-pass-border); }
 .card.kind-draft_reply { background: #fafcff; border-color: #cfe0fd; }
 
 .due {

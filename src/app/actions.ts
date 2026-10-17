@@ -16,6 +16,7 @@ import {
   type SaveAsRule,
 } from "@/lib/approvals";
 import { draftApiFor } from "@/lib/gmail/client";
+import { dismissInsight } from "@/lib/pipeline/insights";
 import { retryAction, runExecutor } from "@/lib/pipeline/execute";
 import { updateProjectSummary } from "@/lib/projects";
 import { createRule, deleteRule, setRuleEnabled, updateRuleText, type NewRule } from "@/lib/rules";
@@ -188,6 +189,15 @@ export async function deleteRuleAction(id: string): Promise<ActionResult> {
   try {
     deleteRule(getDb(), id);
     return done("Rule deleted.");
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+export async function dismissInsightAction(id: string, reason?: string): Promise<ActionResult> {
+  try {
+    if (!dismissInsight(getDb(), id, "user", reason?.trim() || undefined)) return { ok: false, message: "That insight is already closed." };
+    return done("Insight dismissed. Project health recalculated.");
   } catch (err) {
     return fail(err);
   }

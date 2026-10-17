@@ -18,7 +18,10 @@ export const KIND_LABEL: Record<CardKind, string> = {
   draft_reply: "Draft staged",
   internal_task: "Task",
   new_project: "New project?",
+  insight: "Insight",
 };
+
+const SEVERITY_LABEL = { high: "High", medium: "Medium", low: "Low" } as const;
 
 const HEALTH_LABEL: Record<Health, string> = { on_track: "On track", at_risk: "At risk", blocked: "Blocked" };
 
@@ -88,7 +91,8 @@ function Card({ card, triage, hrefFor, selected }: { card: BoardCard; triage: bo
   const failed = card.status?.startsWith("failed");
   const stage = card.kind === "email" && card.status && !failed ? emailStage(card.status, triage) : null;
   const waiting = stage === "Waiting for a person";
-  const doneish = card.status === "done" || card.status === "executed" || card.status === "rejected";
+  const doneish =
+    card.status === "done" || card.status === "executed" || card.status === "rejected" || card.status === "resolved" || card.status === "dismissed";
   return (
     <Link
       className={`card kind-${card.kind}${doneish ? " is-done" : ""}${selected ? " selected" : ""}`}
@@ -98,6 +102,7 @@ function Card({ card, triage, hrefFor, selected }: { card: BoardCard; triage: bo
       <div className="card-top">
         {card.key && <span className="ticket">{card.key}</span>}
         <span className={`chip kind-${card.kind}`}>{KIND_LABEL[card.kind]}</span>
+        {card.severity && card.status === "open" && <span className={`sev sev-${card.severity}`}>{SEVERITY_LABEL[card.severity]}</span>}
         {card.dueAt && card.dueState && (
           <span className={`due ${card.dueState}`}>
             <Icon name="clock" size={11} />
@@ -116,6 +121,7 @@ function Card({ card, triage, hrefFor, selected }: { card: BoardCard; triage: bo
           </span>
         )}
         <Custody producer={card.producedBy} review={card.review} />
+        {card.kind === "insight" && card.producedBy === "rule" && <span className="meta-item">Rule check</span>}
         {card.route && <RouteTraceBadge route={card.route} />}
         {stage && (
           <span className={`meta-item ${waiting ? "waiting" : "processing"}`}>

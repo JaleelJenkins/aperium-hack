@@ -451,6 +451,33 @@ const MIGRATIONS: string[] = [
   ALTER TABLE actions ADD COLUMN gmail_draft_message_id TEXT;  -- opens the draft in Gmail
   ALTER TABLE actions ADD COLUMN executed_at TEXT;
   `,
+
+  /* 011: deterministic insight rules (lib/pipeline/insights.ts) */ `
+  -- "<kind>:<signal id>" for rule-made insights: one row per rule per signal, so a rerun
+  -- updates instead of duplicating, and a dismissed insight stays dismissed.
+  ALTER TABLE insights ADD COLUMN rule_key    TEXT;
+  ALTER TABLE insights ADD COLUMN signal_id   TEXT REFERENCES signals(id) ON DELETE CASCADE;
+  ALTER TABLE insights ADD COLUMN resolved_at TEXT;
+  CREATE UNIQUE INDEX IF NOT EXISTS insights_rule_key_idx ON insights(rule_key) WHERE rule_key IS NOT NULL;
+  `,
+
+  /* 012: eval runner (scripts/eval.ts). review_profile_id may be 'none' for a single-pass
+     pair, so it can't reference model_profiles; pair_id names the leaderboard row. */ `
+  CREATE TABLE eval_runs_v2 (
+    id                TEXT PRIMARY KEY,
+    pair_id           TEXT,
+    reason_profile_id TEXT NOT NULL REFERENCES model_profiles(id),
+    review_profile_id TEXT NOT NULL,           -- model_profiles.id, or 'none' (single pass)
+    started_at        TEXT NOT NULL,
+    finished_at       TEXT,
+    metrics_json      TEXT,
+    results_json      TEXT
+  );
+  INSERT INTO eval_runs_v2 (id, reason_profile_id, review_profile_id, started_at, finished_at, metrics_json, results_json)
+    SELECT id, reason_profile_id, review_profile_id, started_at, finished_at, metrics_json, results_json FROM eval_runs;
+  DROP TABLE eval_runs;
+  ALTER TABLE eval_runs_v2 RENAME TO eval_runs;
+  `,
 ];
 
 export function openDb(file: string): DB {

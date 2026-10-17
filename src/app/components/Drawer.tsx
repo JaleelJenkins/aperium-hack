@@ -4,6 +4,7 @@ import type { RouteTrace } from "@/lib/board";
 import { POLICY_LABEL } from "@/lib/router/types";
 import { ago, dueText, modelShort, secs, usd } from "../format";
 import { ApprovalPanel } from "./ApprovalPanel";
+import { InsightPanel } from "./InsightPanel";
 import { KIND_LABEL, type HrefFor } from "./Board";
 import { DrawerKeys } from "./DrawerKeys";
 import { Icon } from "./Icon";
@@ -253,6 +254,12 @@ export function ModelReasoning({ notes }: { notes: ModelNotes }) {
   );
 }
 
+const RULE_EXPLAIN: Record<string, string> = {
+  unanswered_ask: "The client asked for something and nobody on our side has replied in the thread since.",
+  deadline_no_commitment: "A deadline lands within 48 hours and nobody has committed to it on this project.",
+  overdue_commitment: "We committed to this and the due date has passed.",
+};
+
 export function InspectorDrawer({ item, hrefFor }: { item: Inspection; hrefFor: HrefFor }) {
   const closeHref = hrefFor(null);
   const a = item.audit;
@@ -268,6 +275,14 @@ export function InspectorDrawer({ item, hrefFor }: { item: Inspection; hrefFor: 
       foot={
         item.approval ? (
           <ApprovalPanel key={item.approval.actionId} a={item.approval} />
+        ) : item.insight ? (
+          <InsightPanel
+            key={item.insight.id}
+            i={item.insight}
+            status={item.status}
+            signalHref={item.insight.signalRef ? hrefFor(item.insight.signalRef) : null}
+            messageHref={item.messageHref}
+          />
         ) : (
           item.messageHref && (
             <a className="btn" href={item.messageHref}>
@@ -282,6 +297,7 @@ export function InspectorDrawer({ item, hrefFor }: { item: Inspection; hrefFor: 
         <div className="row" style={{ gap: 8 }}>
           {item.key && <span className="ticket">{item.key}</span>}
           <span className={`chip kind-${item.kind}`}>{KIND_LABEL[item.kind]}</span>
+          {item.insight && <span className={`sev sev-${item.insight.severity}`}>{item.insight.severity}</span>}
           {item.dueAt && <span className="due">{dueText(item.dueAt, Date.parse(item.dueAt) < Date.now())}</span>}
         </div>
         <div className="drawer-title">{item.title}</div>
@@ -290,6 +306,23 @@ export function InspectorDrawer({ item, hrefFor }: { item: Inspection; hrefFor: 
           <span className="mono">{item.status}</span>
         </div>
       </div>
+
+      {item.insight && (
+        <div>
+          <div className="d-section-label">
+            <Icon name="alert" size={12} />
+            {item.insight.byRule ? "Rule check" : "Flagged by the model"}
+          </div>
+          <div className="draft-preview">
+            {item.insight.byRule ? RULE_EXPLAIN[item.insight.kind] ?? "Raised by a deterministic check." : "Raised by Reason and checked by the review model."}
+            {item.insight.suggestedAction && (
+              <div style={{ marginTop: 6 }}>
+                <strong>Next step:</strong> {item.insight.suggestedAction}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {item.draft && (
         <div>
