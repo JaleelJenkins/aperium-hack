@@ -8,6 +8,7 @@
 import type { DB } from "./db";
 import { audit } from "./db";
 import { removeMessages, type RemovableMessage } from "./ingest/remove";
+import { runInsights } from "./pipeline/insights";
 
 const SEED_ID = /^<seed\.([^@>]+)@northbeam\.seed>$/;
 
@@ -63,5 +64,7 @@ export function applyReprocess(db: DB, plan: ReprocessPlan, opts: { dataDir?: st
         THEN 'resolved' ELSE 'ingested' END`);
     db.exec(`UPDATE review_rules SET hits = 0, last_hit_at = NULL`);
     audit(db, "user", "pipeline.reprocess", null, { kept: plan.keep.length, removed: plan.remove.length, cleared: plan.outputs });
+    // Insights are gone, so health must drop back too, not wait for the next pipeline run.
+    runInsights(db);
   })();
 }

@@ -71,8 +71,10 @@ describe("pipeline:reset", () => {
     expect(plan.remove.map((m) => [m.id, m.why]).sort()).toEqual([["dup1", "duplicate copy"], ["other1", "not a seed email"]]);
     expect(plan.outputs.signals).toBeGreaterThan(0);
 
+    db.exec(`UPDATE projects SET health = 'blocked'`); // as left by the insights the reset clears
     applyReprocess(db, plan, { dataDir });
     expect(db.prepare(`SELECT COUNT(*) AS n FROM messages`).get()).toEqual({ n: 15 });
+    expect(db.prepare(`SELECT DISTINCT health FROM projects`).all()).toEqual([{ health: "on_track" }]);
     for (const tname of ["signals", "insights", "actions", "model_reviews", "pipeline_runs"]) {
       expect(db.prepare(`SELECT COUNT(*) AS n FROM ${tname}`).get()).toEqual({ n: 0 });
     }
