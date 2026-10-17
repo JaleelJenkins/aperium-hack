@@ -2,9 +2,8 @@ import Link from "next/link";
 import { getDb } from "@/lib/db";
 import { caughtClaims } from "@/lib/inspect";
 import { modelFamily } from "@/lib/router/leaderboard";
-import { selectOptimalModelPair } from "@/lib/router/pairRouter";
 import { getLeaderboard, getRouterSettings, latestRun, runDecisions } from "@/lib/router/store";
-import type { ModelPairBenchmark, RoutingContext, TrapId, TrapOutcome } from "@/lib/router/types";
+import type { ModelPairBenchmark, TrapId, TrapOutcome } from "@/lib/router/types";
 import { POLICY_LABEL, TRAP_IDS, TRAPS } from "@/lib/router/types";
 import { ClaimDiff, Shell } from "../components/Drawer";
 import { Icon } from "../components/Icon";
@@ -14,11 +13,39 @@ import { RouterConsole } from "./RouterConsole";
 
 export const dynamic = "force-dynamic";
 
-const OUTCOME: Record<TrapOutcome, { label: string; cls: string; icon: "shield" | "spark" | "check" | "alert" }> = {
-  BLOCKED: { label: "BLOCKED", cls: "blocked", icon: "shield" },
-  REVISED: { label: "AUTO-REVISED", cls: "revised", icon: "spark" },
-  AVOIDED: { label: "NOT CLAIMED", cls: "avoided", icon: "check" },
-  LEAKED: { label: "LEAKED TO UI", cls: "leaked", icon: "alert" },
+const OUTCOME: Record<
+  TrapOutcome,
+  { label: string; shortDesc: string; explain: string; cls: string; icon: "shield" | "spark" | "check" | "alert" }
+> = {
+  BLOCKED: {
+    label: "BLOCKED",
+    shortDesc: "Review stopped the bad claim",
+    explain: "The review model caught the unsupported claim and blocked it before it could appear on the project board.",
+    cls: "blocked",
+    icon: "shield",
+  },
+  REVISED: {
+    label: "AUTO-FIXED",
+    shortDesc: "Review corrected the mistake",
+    explain: "The review model spotted the mistake (such as an outdated relative date) and fixed it before showing it on the board.",
+    cls: "revised",
+    icon: "spark",
+  },
+  AVOIDED: {
+    label: "NO ERROR",
+    shortDesc: "Draft model didn't make the mistake",
+    explain: "The draft model read the email accurately and never made the unsupported claim in the first place.",
+    cls: "avoided",
+    icon: "check",
+  },
+  LEAKED: {
+    label: "LEAKED TO BOARD",
+    shortDesc: "Bad claim slipped onto the board",
+    explain:
+      "Leaked to UI: Neither the draft model nor the reviewer caught the trap, so a false claim or unsafe action slipped through onto the live project board.",
+    cls: "leaked",
+    icon: "alert",
+  },
 };
 
 function badgeClass(b: string) {
@@ -37,17 +64,6 @@ function verdictLabel(b: string): string {
   return b;
 }
 
-const plainCtx = (over: Partial<RoutingContext>): RoutingContext => ({
-  projectId: "kpi",
-  hasPdfAttachment: false,
-  hasImageAttachment: false,
-  containsFinancialOrScopeKeywords: false,
-  isUnknownSenderDomain: false,
-  hasQuotedRelativeDate: false,
-  policyMode: "pareto_auto",
-  ...over,
-});
-
 /** Model Trust Scoreboard (PRD F6.6 + F7): pair router, leaderboard, trap matrix. */
 export default async function ScoreboardPage({ searchParams }: { searchParams: Promise<{ trap?: string; pair?: string }> }) {
   const { trap, pair } = await searchParams;
@@ -59,19 +75,6 @@ export default async function ScoreboardPage({ searchParams }: { searchParams: P
   const decisions = run ? runDecisions(db, run.id) : [];
   const illustrative = board.some((p) => p.source === "illustrative");
   const byId = new Map(board.map((p) => [p.id, p]));
-
-  // KPI tiles, all derived from the leaderboard and the active policy.
-  const base = selectOptimalModelPair(plainCtx({ policyMode: settings.defaultPolicy, pinnedPairId: settings.pinnedPairId }), board);
-  const risky = selectOptimalModelPair(
-    plainCtx({ policyMode: settings.defaultPolicy, pinnedPairId: settings.pinnedPairId, hasPdfAttachment: true }),
-    board,
-  );
-  const reviewed = board.filter((p) => p.reviewModel);
-  const bestLift = reviewed.reduce((a, b) => (b.rescueLift > a.rescueLift ? b : a), reviewed[0]);
-  const bestTrap = board.reduce((a, b) => (b.trapCatchRate > a.trapCatchRate || (b.trapCatchRate === a.trapCatchRate && b.avgLatencyMs < a.avgLatencyMs) ? b : a));
-  const frontier = board.reduce((a, b) => (b.costPer1kEmailsUsd > a.costPer1kEmailsUsd ? b : a));
-  const optimal = board.find((p) => p.verdictBadge === "PARETO OPTIMAL") ?? board[0];
-  const cheaper = 1 - optimal.costPer1kEmailsUsd / frontier.costPer1kEmailsUsd;
 
   const trapId = TRAP_IDS.includes(trap as TrapId) ? (trap as TrapId) : null;
   const trapPair = pair ? byId.get(pair) : undefined;
@@ -88,62 +91,13 @@ export default async function ScoreboardPage({ searchParams }: { searchParams: P
         </div>
       </div>
 
-      <RouterConsole leaderboard={board} defaultPolicy={settings.defaultPolicy} pinnedPairId={settings.pinnedPairId} emailCount={emailCount} />
-
-      {illustrative && (
-        <div className="illustrative-note">
-          <span className="tag-illustrative mono">Sample benchmark</span>
-          Rows marked sample use baseline numbers until a live evaluation run completes. Routing policies and the email simulator below run live.
-        </div>
-      )}
-
-      <div className="kpis">
-        <div className="kpi">
-          <div className="stat-label">
-            <Icon name="board" size={12} />
-            Active routing policy
-          </div>
-          <div className="kpi-value small">{POLICY_LABEL[settings.defaultPolicy]}</div>
-          <div className="kpi-sub mono">
-            {modelFamily(base.selectedPair.reasonModel)} → {modelFamily(base.selectedPair.reviewModel)}
-            {risky.selectedPair.id !== base.selectedPair.id && (
-              <>
-                {" "}· ↑ {modelFamily(risky.selectedPair.reasonModel)} → {modelFamily(risky.selectedPair.reviewModel)} on complex mail
-              </>
-            )}
-          </div>
-        </div>
-        <div className="kpi">
-          <div className="stat-label">
-            <Icon name="shield" size={12} />
-            Review accuracy boost
-          </div>
-          <div className="kpi-value violet">{signedPct(bestLift.rescueLift)}</div>
-          <div className="kpi-sub">Extra accuracy gained by adding a second review model ({modelFamily(bestLift.reasonModel)} → {modelFamily(bestLift.reviewModel)})</div>
-        </div>
-        <div className="kpi">
-          <div className="stat-label">
-            <Icon name="alert" size={12} />
-            Safety checks passed
-          </div>
-          <div className="kpi-value green">
-            {bestTrap.trapsCaughtCount} / 4 <span className="kpi-unit">({pct(bestTrap.trapCatchRate, 0)})</span>
-          </div>
-          <div className="kpi-sub">Catches PDF mismatches, outdated dates, unapproved quotes, and suspicious invoices</div>
-        </div>
-        <div className="kpi">
-          <div className="stat-label">
-            <Icon name="clock" size={12} />
-            Speed &amp; cost per email
-          </div>
-          <div className="kpi-value small mono">
-            {secs(optimal.avgLatencyMs)} · {usd(optimal.costPer1kEmailsUsd / 1000)}/email
-          </div>
-          <div className="kpi-sub">
-            {pct(cheaper, 0)} lower cost than the heaviest {modelFamily(frontier.reasonModel)} → {modelFamily(frontier.reviewModel)} pair
-          </div>
-        </div>
-      </div>
+      <RouterConsole
+        leaderboard={board}
+        defaultPolicy={settings.defaultPolicy}
+        pinnedPairId={settings.pinnedPairId}
+        emailCount={emailCount}
+        illustrative={illustrative}
+      />
 
       <section className="panel table-panel">
         <div className="panel-head">
@@ -184,6 +138,20 @@ export default async function ScoreboardPage({ searchParams }: { searchParams: P
         <div className="panel-head">
           <h2>Safety Checks by Scenario</h2>
           <span className="muted">How each model pair handles 4 tricky email scenarios · click any cell to inspect</span>
+        </div>
+        <div className="matrix-legend" aria-label="Safety check outcome definitions">
+          {(["BLOCKED", "REVISED", "AVOIDED", "LEAKED"] as TrapOutcome[]).map((k) => {
+            const o = OUTCOME[k];
+            return (
+              <div key={k} className="matrix-legend-item" title={o.explain}>
+                <span className={`m-cell inline ${o.cls}`}>
+                  <Icon name={o.icon} size={11} />
+                  {o.label}
+                </span>
+                <span className="matrix-legend-desc">{o.shortDesc}</span>
+              </div>
+            );
+          })}
         </div>
         <div className="table-scroll">
           <div className="matrix">
@@ -318,7 +286,13 @@ function MatrixRow({ p }: { p: ModelPairBenchmark }) {
         const r = p.trapMatrix[id];
         const o = OUTCOME[r.outcome];
         return (
-          <Link key={id} className={`m-cell ${o.cls}`} href={`/scoreboard?trap=${id}&pair=${p.id}`} scroll={false} title={r.note}>
+          <Link
+            key={id}
+            className={`m-cell ${o.cls}`}
+            href={`/scoreboard?trap=${id}&pair=${p.id}`}
+            scroll={false}
+            title={`${o.explain} (${r.note})`}
+          >
             <Icon name={o.icon} size={12} />
             <span>{o.label}</span>
             {r.outcome !== "LEAKED" && r.latencyMs > 0 && <span className="m-lat">· {secs(r.latencyMs)}</span>}
@@ -352,8 +326,11 @@ function TrapDrawer({ trapId, pair }: { trapId: TrapId; pair: ModelPairBenchmark
             <Icon name={o.icon} size={12} />
             {o.label}
           </span>
-          {pair.source === "illustrative" && <span className="tag-illustrative mono">Illustrative result</span>}
+          {pair.source === "illustrative" && <span className="tag-illustrative mono">Sample result</span>}
         </div>
+        <p className="muted" style={{ margin: "8px 0 0", fontSize: 12.5 }}>
+          {o.explain}
+        </p>
       </div>
       <div>
         <div className="d-section-label">
