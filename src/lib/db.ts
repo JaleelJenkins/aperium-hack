@@ -389,7 +389,17 @@ const MIGRATIONS: string[] = [
   ALTER TABLE threads ADD COLUMN assignment_reason TEXT;  -- one line, shown on the card
   `,
 
-  /* 005: Performance indexes for dashboard queries */ `
+  /* 005: Reason + Review stages. Reason's verified output waits here for Review, so a
+     failed Review retries without paying for Reason again. */ `
+  ALTER TABLE pipeline_runs ADD COLUMN pair_id     TEXT;     -- router pair, e.g. haiku-sonnet
+  ALTER TABLE pipeline_runs ADD COLUMN stage       TEXT;     -- reasoned | reviewed | failed
+  ALTER TABLE pipeline_runs ADD COLUMN reason_json TEXT;     -- verified Reason output awaiting Review
+  ALTER TABLE pipeline_runs ADD COLUMN reason_ms   INTEGER;
+  ALTER TABLE pipeline_runs ADD COLUMN review_ms   INTEGER;
+  ALTER TABLE pipeline_runs ADD COLUMN provider    TEXT;     -- anthropic | openrouter | mixed
+  `,
+
+  /* 006: Performance indexes for dashboard queries */ `
   CREATE INDEX IF NOT EXISTS signals_project_status_idx ON signals(project_id, status);
   CREATE INDEX IF NOT EXISTS signals_due_status_idx ON signals(status, type, due_at);
   CREATE INDEX IF NOT EXISTS attachments_status_kind_idx ON attachments(status, kind);

@@ -100,7 +100,7 @@ describe("demo snapshots", () => {
     delete process.env.LIVE_DEMO_SENDER;
     const bare = blocking({});
     expect(bare.some((l) => l.startsWith("Missing GOOGLE_CLIENT_ID"))).toBe(true);
-    expect(bare).toContain("ANTHROPIC_API_KEY not set");
+    expect(bare).toContain("No model key: ANTHROPIC_API_KEY or OPENROUTER_API_KEY not set");
     expect(bare).toContain("Live demo sender not configured");
     expect(bare).toContain("gmail.compose not granted: approved replies can't become drafts");
 

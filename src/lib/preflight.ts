@@ -30,8 +30,9 @@ export function runPreflight(db: DB, opts: { now?: number; env?: Record<string, 
   const missing = ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "TOKEN_ENCRYPTION_KEY"].filter((k) => !env[k]);
   if (missing.length) add("fail", `Missing ${missing.join(", ")}`, "npm run setup, then fill .env.local");
   else add("ok", "Google OAuth + token encryption configured");
-  if (!env.ANTHROPIC_API_KEY) add("fail", "ANTHROPIC_API_KEY not set", "add it to .env.local; Reason and Review can't run without it");
-  else add("ok", "ANTHROPIC_API_KEY set");
+  const keys = ["ANTHROPIC_API_KEY", "OPENROUTER_API_KEY"].filter((k) => env[k]?.trim());
+  if (!keys.length) add("fail", "No model key: ANTHROPIC_API_KEY or OPENROUTER_API_KEY not set", "add one to .env.local; Reason and Review can't run without it");
+  else add("ok", `${keys.join(" + ")} set`);
 
   // Live demo sender
   const sender = liveDemoSender();

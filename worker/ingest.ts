@@ -12,7 +12,7 @@ import { getDb } from "../src/lib/db";
 import { listAccounts } from "../src/lib/gmail/client";
 import { syncAll } from "../src/lib/ingest/sync";
 import { applySeed, readSeed } from "../src/lib/seed";
-import { hasApiKey } from "../src/lib/pipeline/llm";
+import { hasApiKey, providerSummary } from "../src/lib/pipeline/llm";
 import { defaultDeps, describe, runPipeline } from "../src/lib/pipeline/run";
 
 const pipelineDeps = defaultDeps();
@@ -39,7 +39,7 @@ async function tick(): Promise<void> {
     if (r.failed.length) parts.push(`${r.failed.length} failed (${r.failed.map((f) => f.error).join("; ")})`);
     if (r.newEmailIds.length || r.failed.length || r.mode === "bootstrap" || once) log(`${r.account}: ${parts.join(", ")}`);
   }
-  // Extract + Resolve whatever is waiting (new mail, or a backlog after adding an API key).
+  // Extract, Resolve, Reason and Review whatever is waiting (new mail, or a backlog after adding an API key).
   try {
     for (const line of describe(await runPipeline(db, pipelineDeps))) log(line);
   } catch (err) {
@@ -55,8 +55,8 @@ async function main(): Promise<void> {
   log(`db ${config.dbPath}; polling every ${config.pollIntervalMs}ms${once ? " (once)" : ""}`);
   log(
     hasApiKey()
-      ? `pipeline: extract with ${pipelineDeps.extractor!.model}, resolve with ${pipelineDeps.matcher.model}`
-      : "pipeline: no ANTHROPIC_API_KEY, so attachments are not extracted and projects are matched by word overlap",
+      ? `pipeline (${providerSummary()}): extract with ${pipelineDeps.extractor!.model}, resolve with ${pipelineDeps.matcher.model}, reason/review with the routed pair`
+      : "pipeline: no ANTHROPIC_API_KEY or OPENROUTER_API_KEY, so attachments are not extracted, projects are matched by word overlap, and Reason/Review are skipped",
   );
   const db = getDb();
   if (!(db.prepare(`SELECT 1 FROM clients LIMIT 1`).get())) {
