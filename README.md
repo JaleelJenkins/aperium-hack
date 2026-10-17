@@ -142,6 +142,7 @@ npm run worker
 | `EXTRACT_IMAGE_MODEL` | Extract | images, default `claude-haiku-5-5` |
 | `RESOLVE_FAST_THRESHOLD` | Resolve | word-overlap confidence at which a thread is filed without a model call, default `0.85` |
 | `EXTRACT_MODEL`, `RESOLVE_MODEL` | Extract, Resolve | defaults `claude-sonnet-5-5`, `claude-haiku-5-5` |
+| `LLM_TIMEOUT_MS` | model layer | per-request timeout before a retry, default `90000`, so a stuck call can't stall the pipeline |
 | `ASK_SLA_HOURS` | insight rules | hours before an unanswered client ask is flagged, default `24` |
 | `LIVE_DEMO_SENDER` | live demo | the teammate's phone address; `npm run seed` maps it to Harbor & Pine in place of `CHANGE_ME.live-demo` |
 | `DATA_DIR` | storage | SQLite DB + attachments, default `./data` (gitignored) |

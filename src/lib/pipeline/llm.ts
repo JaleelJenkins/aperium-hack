@@ -9,7 +9,7 @@
  */
 import Anthropic from "@anthropic-ai/sdk";
 import { estimateCost, hasModelKey, routeModel, type Provider } from "./models";
-import { openRouterCall } from "./openrouter";
+import { llmTimeoutMs, openRouterCall } from "./openrouter";
 import { withToolInstruction } from "./tool-instruction";
 
 export type ContentBlock = Anthropic.Messages.ContentBlockParam;
@@ -66,7 +66,8 @@ export function providerSummary(): string {
 let anthropic: Anthropic | null = null;
 
 async function anthropicCall<T>(model: string, req: ToolCall<T>): Promise<LlmResult<T>> {
-  anthropic ??= new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 3 });
+  // Bounded per request (default 90 s, then up to 2 retries) so a hung call can't stall the pipeline lease.
+  anthropic ??= new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 2, timeout: llmTimeoutMs() });
   const res = await anthropic.messages.create({
     model,
     max_tokens: req.maxTokens ?? 4096,
