@@ -14,6 +14,9 @@
 import type { DB } from "./db";
 import type { Evidence } from "./contracts";
 import { evidenceHref } from "./evidence";
+import { modelFamily } from "./router/leaderboard";
+import { getLeaderboard, getRouterSettings, projectRouting, routeMessage, type ProjectRouting } from "./router/store";
+import type { RoutingPolicyMode } from "./router/types";
 
 export const COLUMNS = [
   { id: "triage", title: "Triage", hint: "New mail being processed" },
@@ -60,6 +63,24 @@ export interface BoardCard {
   producedBy: string | null;
   status: string | null;
   at: string;
+  /** Which Reason -> Review pair the router sends this card's email to, and why. */
+  route: RouteTrace | null;
+}
+
+export interface RouteTrace {
+  pairId: string;
+  pairLabel: string; // "Haiku 5.5 → Sonnet 5.5"
+  pairShort: string; // "Haiku → Sonnet"
+  policy: RoutingPolicyMode;
+  escalated: boolean;
+  triggers: string[];
+  reason: string;
+  estCostUsd: number;
+  estLatencyMs: number;
+  /** true = decision recorded by the pipeline at ingest; false = live, under current policies. */
+  recorded: boolean;
+  /** Estimates come from an illustrative (not yet measured) leaderboard row. */
+  illustrative: boolean;
 }
 
 export interface Lane {
@@ -76,6 +97,8 @@ export interface Lane {
   stats: { open: number; overdue: number; dueSoon: number; approvals: number; blockedByReview: number };
   /** Higher = needs attention sooner. Lanes sort by this within a client. */
   attention: number;
+  /** The project's routing policy (null for the triage lane). */
+  routing: ProjectRouting | null;
 }
 
 export interface ClientGroup {
@@ -111,6 +134,15 @@ function parseEvidence(json: string | null): Evidence[] {
   try {
     const v = JSON.parse(json);
     return Array.isArray(v) ? (v as Evidence[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseStrings(json: string | null): string[] {
+  try {
+    const v = JSON.parse(json ?? "[]");
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
   } catch {
     return [];
   }
@@ -342,6 +374,61 @@ export function getBoard(db: DB, opts: { filter?: BoardFilter; now?: number } = 
   const keys = ticketKeys(db);
   const model = modelNames(db);
 
+  // Routing: a decision the pipeline recorded at ingest wins; otherwise route live under current policies,
+  // so a policy change or a promoted pair shows up on the board immediately.
+  const routerSettings = getRouterSettings(db);
+  const leaderboard = getLeaderboard(db);
+  const pairById = new Map(leaderboard.map((p) => [p.id, p]));
+  const recorded = db.prepare(
+    `SELECT policy, pair_id, escalated, triggers_json, reason, est_cost_usd, est_latency_ms FROM route_decisions
+      WHERE message_id = ? AND source = 'pipeline' ORDER BY at DESC LIMIT 1`,
+  );
+  const routes = new Map<string, RouteTrace | null>();
+  const routeFor = (messageId: string | null): RouteTrace | null => {
+    if (!messageId) return null;
+    if (routes.has(messageId)) return routes.get(messageId)!;
+    let trace: RouteTrace | null = null;
+    const r = recorded.get(messageId) as
+      | { policy: RoutingPolicyMode; pair_id: string; escalated: number; triggers_json: string; reason: string; est_cost_usd: number; est_latency_ms: number }
+      | undefined;
+    if (r) {
+      const p = pairById.get(r.pair_id);
+      trace = {
+        pairId: r.pair_id,
+        pairLabel: p?.label ?? r.pair_id,
+        pairShort: p ? `${modelFamily(p.reasonModel)} → ${modelFamily(p.reviewModel)}` : r.pair_id,
+        policy: r.policy,
+        escalated: r.escalated === 1,
+        triggers: parseStrings(r.triggers_json),
+        reason: r.reason,
+        estCostUsd: r.est_cost_usd,
+        estLatencyMs: r.est_latency_ms,
+        recorded: true,
+        illustrative: p?.source === "illustrative",
+      };
+    } else {
+      const d = routeMessage(db, messageId, leaderboard, routerSettings);
+      if (d) {
+        const p = d.selectedPair;
+        trace = {
+          pairId: p.id,
+          pairLabel: p.label,
+          pairShort: `${modelFamily(p.reasonModel)} → ${modelFamily(p.reviewModel)}`,
+          policy: d.policyApplied,
+          escalated: d.wasEscalated,
+          triggers: d.escalationTriggers,
+          reason: d.routingReason,
+          estCostUsd: d.estimatedCostUsd,
+          estLatencyMs: d.estimatedLatencyMs,
+          recorded: false,
+          illustrative: p.source === "illustrative",
+        };
+      }
+    }
+    routes.set(messageId, trace);
+    return trace;
+  };
+
   const lanes = new Map<string, Lane>();
   const doneAll = new Map<string, BoardCard[]>();
   for (const p of projects) {
@@ -357,6 +444,7 @@ export function getBoard(db: DB, opts: { filter?: BoardFilter; now?: number } = 
       doneTotal: 0,
       stats: { open: 0, overdue: 0, dueSoon: 0, approvals: 0, blockedByReview: blockedByProject.get(p.id) ?? 0 },
       attention: 0,
+      routing: projectRouting(db, p.id, routerSettings),
     });
     doneAll.set(p.id, []);
   }
@@ -373,6 +461,7 @@ export function getBoard(db: DB, opts: { filter?: BoardFilter; now?: number } = 
     doneTotal: 0,
     stats: { open: 0, overdue: 0, dueSoon: 0, approvals: 0, blockedByReview: 0 },
     attention: 0,
+    routing: null,
   };
 
   for (const s of signals) {
@@ -395,6 +484,7 @@ export function getBoard(db: DB, opts: { filter?: BoardFilter; now?: number } = 
       producedBy: model(s.produced_by_model),
       status: s.status,
       at: s.created_at,
+      route: routeFor(s.message_id),
     };
     if (s.status !== "open" || s.type === "decision") {
       doneAll.get(s.project_id)!.push(card);
@@ -437,6 +527,7 @@ export function getBoard(db: DB, opts: { filter?: BoardFilter; now?: number } = 
       producedBy: model(a.produced_by_model),
       status: a.status,
       at: a.decided_at ?? a.created_at,
+      route: routeFor(a.message_id),
     };
     if (a.status === "proposed" || a.status === "approved" || a.status === "edited") lane.columns.approval.push(card);
     else if (a.project_id) doneAll.get(a.project_id)!.push(card);
@@ -462,6 +553,7 @@ export function getBoard(db: DB, opts: { filter?: BoardFilter; now?: number } = 
       producedBy: null,
       status: m.status === "failed" ? `failed: ${m.error ?? "unknown error"}` : m.status,
       at: m.received_at,
+      route: routeFor(m.id),
     });
   }
 

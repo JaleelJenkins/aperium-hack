@@ -55,14 +55,17 @@ Each stage picks up `messages.status` from the previous one: `ingested → extra
 | | Executor calls `drafts.create` in thread only, never `messages.send` | P0 | ⬜ scope granted | `gmail.compose` |
 | | Every decision audited | P0 | ✅ table + helper | `audit_events`, `audit()` |
 | **F6 Views** | Portfolio board: client/project swimlanes × workflow columns (Triage · Waiting on us · Waiting on client · Needs approval · Done), sorted by risk | P0 | ✅ | `src/app/page.tsx`, `src/lib/board.ts` |
-| | Project page · Action inbox · Evidence drawer · Caught by review · Scoreboard | P0 | ⬜ | `src/app/` |
+| | Evidence drawer · Caught by review | P0 | ✅ | `src/app/components/Drawer.tsx`, `src/lib/inspect.ts` |
+| | Model scoreboard: policy switcher, payload simulator, pair leaderboard, trap matrix, routing dry-run | P0 | ✅ (benchmarks illustrative until eval runner) | `src/app/scoreboard/`, `src/lib/router/` |
+| | Project page · Action inbox | P0 | ⬜ | `src/app/` |
 | | Message source view with line anchors (evidence target) | P0 | ✅ | `src/app/messages/[id]` |
 | | Activity & audit feed | P1 | ⬜ | |
 | **F7 Review & eval** | Output + review contracts | P0 | ✅ | `src/lib/contracts.ts` |
 | | Server drops AI items without valid evidence | P0 | ✅ | `src/lib/evidence.ts` → `keepSupported()` |
-| | Model profiles + per-stage user choice | P0 | ✅ data, ⬜ router + settings UI | `model_profiles`, `user_model_prefs` |
+| | Model profiles + per-stage user choice | P0 | ✅ data, ⬜ wire into pipeline | `model_profiles`, `user_model_prefs` |
+| | Reason × Review pair router: per-project policy (seeded per client), escalation on payload risk, promote/pin, route trace on cards | P0 | ✅ | `src/lib/router/pairRouter.ts`, `store.ts` |
 | | Labeled seed set | P0 | ✅ | `seed/emails.ts`, `npm run seed:inbox` |
-| | Eval runner + scoreboard | P0 | ⬜ labels ready | `seed/labels.json`, `data/seed-run.json`, `eval_runs` |
+| | Eval runner | P0 | ⬜ labels ready. Runner writes `eval_runs.metrics_json` per `EvalRunMetrics` (`src/lib/router/store.ts`); the scoreboard swaps the illustrative row for the measured one | `seed/labels.json`, `data/seed-run.json`, `eval_runs` |
 
 ## Setup
 

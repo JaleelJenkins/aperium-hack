@@ -73,30 +73,35 @@
     {
       "id": "harbor-lobby",
       "client_id": "harbor-pine",
+      "routing_policy": "complexity_escalation",
       "name": "Lobby redesign",
       "summary": "Redesign of the ground-floor lobby; client sends marked-up floor plans and site photos."
     },
     {
       "id": "vector-route-dashboard",
       "client_id": "vector-freight",
+      "routing_policy": "low_latency",
       "name": "Route dashboard",
       "summary": "Ops dashboard for live routes; client reports bugs with screenshots."
     },
     {
       "id": "vector-driver-pilot",
       "client_id": "vector-freight",
+      "routing_policy": "low_latency",
       "name": "Driver app pilot",
       "summary": "Pilot of the driver mobile app with a subset of drivers; pilot date is client-driven."
     },
     {
       "id": "lumen-website",
       "client_id": "lumen-clinic",
+      "routing_policy": "strict_trust",
       "name": "Website refresh",
       "summary": "Refresh of the clinic marketing site; a quote for added pages is outstanding."
     },
     {
       "id": "lumen-booking",
       "client_id": "lumen-clinic",
+      "routing_policy": "strict_trust",
       "name": "Booking integration",
       "summary": "Online booking integration with the clinic's scheduling system."
     }
@@ -139,6 +144,7 @@
       "cost_out_per_mtok": 20
     }
   ],
+  "default_routing_policy": "pareto_auto",
   "default_model_prefs": {
     "reason": "claude-sonnet",
     "review": "claude-opus"

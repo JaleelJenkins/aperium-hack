@@ -340,6 +340,48 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX pipeline_runs_message_idx ON pipeline_runs(message_id);
   `,
+
+  /* 003: Reason x Review pair routing (lib/router) */ `
+  -- Per-project routing policy; NULL = inherit the global default in app_settings.
+  ALTER TABLE projects ADD COLUMN routing_policy TEXT;  -- pareto_auto | complexity_escalation | strict_trust | low_latency | pinned
+  ALTER TABLE projects ADD COLUMN pinned_pair_id TEXT;  -- leaderboard pair id when routing_policy = 'pinned'
+
+  -- Small key/value store: router.default_policy, router.pinned_pair_id.
+  CREATE TABLE app_settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
+
+  -- A batch of routing decisions: the scoreboard's dry-run over seeded mail, or the live pipeline.
+  CREATE TABLE route_runs (
+    id           TEXT PRIMARY KEY,
+    kind         TEXT NOT NULL,                 -- dry_run | pipeline
+    started_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    finished_at  TEXT,
+    emails       INTEGER NOT NULL DEFAULT 0,
+    escalated    INTEGER NOT NULL DEFAULT 0,
+    summary_json TEXT                           -- {pairs: {pairId: n}, triggers: {trigger: n}}
+  );
+
+  -- One row per email routed: which pair, under which policy, and why.
+  CREATE TABLE route_decisions (
+    id             TEXT PRIMARY KEY,
+    run_id         TEXT REFERENCES route_runs(id) ON DELETE CASCADE,
+    message_id     TEXT NOT NULL REFERENCES messages(gmail_message_id) ON DELETE CASCADE,
+    project_id     TEXT,
+    policy         TEXT NOT NULL,
+    pair_id        TEXT NOT NULL,
+    escalated      INTEGER NOT NULL,
+    triggers_json  TEXT NOT NULL DEFAULT '[]',
+    reason         TEXT NOT NULL,
+    est_cost_usd   REAL,
+    est_latency_ms INTEGER,
+    source         TEXT NOT NULL,               -- dry_run | pipeline
+    at             TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  );
+  CREATE INDEX route_decisions_message_idx ON route_decisions(message_id, at);
+  CREATE INDEX route_decisions_run_idx ON route_decisions(run_id);
+  `,
 ];
 
 export function openDb(file: string): DB {

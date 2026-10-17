@@ -49,6 +49,15 @@ export function hue(name: string): number {
   return h;
 }
 
+/** 0.73 -> "73.0%" */
+export const pct = (n: number, digits = 1) => `${(n * 100).toFixed(digits)}%`;
+/** 0.25 -> "+25.0%", 0 -> "0.0%" */
+export const signedPct = (n: number, digits = 1) => `${n > 0 ? "+" : ""}${(n * 100).toFixed(digits)}%`;
+/** 3800 -> "3.8s", 900 -> "0.9s" */
+export const secs = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
+/** 0.0042 -> "$0.0042", 4.2 -> "$4.20" */
+export const usd = (n: number) => (n < 0.1 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`);
+
 export function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;

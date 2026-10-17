@@ -5,7 +5,7 @@ import { KIND_LABEL, type HrefFor } from "./Board";
 import { DrawerKeys } from "./DrawerKeys";
 import { Icon } from "./Icon";
 
-function Shell({
+export function Shell({
   title,
   vault,
   closeHref,
@@ -36,7 +36,7 @@ function Shell({
   );
 }
 
-function Source({ src }: { src: SourceView }) {
+export function Source({ src }: { src: SourceView }) {
   return (
     <div className="source-card">
       <div className="source-meta">
@@ -221,41 +221,46 @@ export function CaughtDrawer({ claims, hrefFor }: { claims: CaughtClaim[]; hrefF
         deterministic evidence check, or a policy guard, with the reason logged.
       </p>
       {claims.map((c) => (
-        <div className="diff" key={c.id}>
-          <div className="diff-head trap-quarantine-banner">
-            <strong>{c.project ? `${c.project.clientName} / ${c.project.name}` : "Unfiled"}</strong>
-            <span className="spacer" />
-            <span className="mono" style={{ fontSize: 11 }}>
-              {ago(c.at)}
-            </span>
-          </div>
-          <div className="diff-cols">
-            <div className="diff-col">
-              <div className="diff-label">
-                <Icon name="zap" size={11} />
-                Reason · {modelShort(c.producer)}
-              </div>
-              <div className="claim-struck">{c.claim}</div>
-            </div>
-            <div className="diff-col">
-              <div className="diff-label">
-                <Icon name="shield" size={11} />
-                {c.reviewer ? `Review · ${modelShort(c.reviewer)}` : BLOCKED_BY[c.blockedBy ?? "review"]}
-                <span className="verdict block">Blocked</span>
-              </div>
-              <div>{c.notes}</div>
-            </div>
-          </div>
-          {(c.conflicting.length > 0 || c.source) && (
-            <div style={{ padding: 10, borderTop: "1px solid var(--status-block-border)", display: "flex", flexDirection: "column", gap: 8 }}>
-              {c.conflicting.length > 0
-                ? c.conflicting.map((s, i) => <Source key={i} src={s} />)
-                : c.source && <Source src={c.source} />}
-            </div>
-          )}
-        </div>
+        <ClaimDiff key={c.id} c={c} />
       ))}
       {claims.length === 0 && <p className="muted">Nothing blocked yet.</p>}
     </Shell>
+  );
+}
+
+/** One blocked claim: Reason's claim (struck) vs the review verdict, with the contradicting evidence. */
+export function ClaimDiff({ c }: { c: CaughtClaim }) {
+  return (
+    <div className="diff">
+      <div className="diff-head trap-quarantine-banner">
+        <strong>{c.project ? `${c.project.clientName} / ${c.project.name}` : "Unfiled"}</strong>
+        <span className="spacer" />
+        <span className="mono" style={{ fontSize: 11 }}>
+          {ago(c.at)}
+        </span>
+      </div>
+      <div className="diff-cols">
+        <div className="diff-col">
+          <div className="diff-label">
+            <Icon name="zap" size={11} />
+            Reason · {modelShort(c.producer)}
+          </div>
+          <div className="claim-struck">{c.claim}</div>
+        </div>
+        <div className="diff-col">
+          <div className="diff-label">
+            <Icon name="shield" size={11} />
+            {c.reviewer ? `Review · ${modelShort(c.reviewer)}` : BLOCKED_BY[c.blockedBy ?? "review"]}
+            <span className="verdict block">Blocked</span>
+          </div>
+          <div>{c.notes}</div>
+        </div>
+      </div>
+      {(c.conflicting.length > 0 || c.source) && (
+        <div style={{ padding: 10, borderTop: "1px solid var(--status-block-border)", display: "flex", flexDirection: "column", gap: 8 }}>
+          {c.conflicting.length > 0 ? c.conflicting.map((s, i) => <Source key={i} src={s} />) : c.source && <Source src={c.source} />}
+        </div>
+      )}
+    </div>
   );
 }
