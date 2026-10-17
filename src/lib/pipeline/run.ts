@@ -10,6 +10,7 @@
  * (Anthropic and/or OpenRouter, see llm.ts / models.ts).
  */
 import type { DB } from "../db";
+import type { EmailOutcome } from "../run-log";
 import { claudeExtractor, runExtract, type ExtractResult, type Extractor } from "./extract";
 import { hasApiKey, pipelineLlm } from "./llm";
 import { runInsights, type InsightsResult } from "./insights";
@@ -59,7 +60,14 @@ const emptyResult = (deps: PipelineDeps): Omit<PipelineResult, "insights"> & { i
 export async function runPipeline(
   db: DB,
   deps: PipelineDeps = defaultDeps(),
-  opts: { dataDir?: string; now?: Date; concurrency?: number; limit?: number } = {},
+  opts: {
+    dataDir?: string;
+    now?: Date;
+    concurrency?: number;
+    limit?: number;
+    /** Called as each email finishes all its stages (the live run log on the board). */
+    onEmail?: (o: EmailOutcome) => void;
+  } = {},
 ): Promise<PipelineResult> {
   const started = Date.now();
   const out = emptyResult(deps);
@@ -73,6 +81,7 @@ export async function runPipeline(
   for (const r of rows) threads.set(r.thread_id, [...(threads.get(r.thread_id) ?? []), r.id]);
 
   const one = async (id: string) => {
+    const o: EmailOutcome = { messageId: id };
     if (deps.extractor && out.extract) {
       const e = await runExtract(db, deps.extractor, { dataDir: opts.dataDir, onlyId: id });
       out.extract.messages += e.messages;
@@ -84,13 +93,28 @@ export async function runPipeline(
     out.resolve.inherited += r.inherited;
     out.resolve.cards.push(...r.cards);
     out.resolve.failed.push(...r.failed);
+    const filed = r.assigned[0];
+    if (filed) o.filed = { project: filed.project, by: filed.by, confidence: filed.confidence };
+    if (r.cards.length) o.card = true;
+    if (r.failed.length) o.failed = `resolve: ${r.failed[0].error}`;
     if (deps.reasonReview && out.reasonReview) {
       const rr = await runReasonReview(db, deps.reasonReview, { now: opts.now, onlyId: id });
       out.reasonReview.reasoned += rr.reasoned;
       out.reasonReview.reviewed += rr.reviewed;
       out.reasonReview.failed.push(...rr.failed);
       out.reasonReview.perMessage.push(...rr.perMessage);
+      const pm = rr.perMessage[0];
+      if (pm) {
+        const c = pm.counts;
+        o.counts = { signals: c.signals, insights: c.insights, actions: c.actions, caught: c.blocked.review + c.blocked.verify + c.blocked.policy, revised: c.revised };
+        o.reasonMs = pm.reason_ms ?? null;
+        o.reviewMs = pm.review_ms ?? null;
+        o.costUsd = pm.cost_usd;
+      }
+      if (rr.failed.length) o.failed = `${rr.failed[0].stage}: ${rr.failed[0].error}`;
     }
+    // Only report emails that reached an end state in this run (reviewed, carded or failed).
+    if (o.counts || o.card || o.failed || (!deps.reasonReview && o.filed)) opts.onEmail?.(o);
   };
 
   const queue = [...threads.values()];

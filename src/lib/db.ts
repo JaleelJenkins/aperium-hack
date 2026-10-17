@@ -478,6 +478,30 @@ const MIGRATIONS: string[] = [
   DROP TABLE eval_runs;
   ALTER TABLE eval_runs_v2 RENAME TO eval_runs;
   `,
+
+  /* 013: live run log for Sync now / worker runs, shown on the board */ `
+  CREATE TABLE pipeline_batches (
+    id           TEXT PRIMARY KEY,
+    source       TEXT NOT NULL,                 -- web (Sync now) | worker | cli
+    started_at   TEXT NOT NULL,
+    finished_at  TEXT,
+    total        INTEGER NOT NULL DEFAULT 0,    -- emails waiting when it started
+    done         INTEGER NOT NULL DEFAULT 0,
+    elapsed_ms   INTEGER,
+    summary_json TEXT,                          -- final counts, shown when it finishes
+    error        TEXT
+  );
+  CREATE TABLE pipeline_log (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    batch_id TEXT NOT NULL REFERENCES pipeline_batches(id) ON DELETE CASCADE,
+    at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    kind     TEXT NOT NULL,                     -- email | card | failed | info
+    message_id TEXT,
+    line     TEXT NOT NULL,
+    detail_json TEXT
+  );
+  CREATE INDEX pipeline_log_batch_idx ON pipeline_log(batch_id, id);
+  `,
 ];
 
 export function openDb(file: string): DB {
