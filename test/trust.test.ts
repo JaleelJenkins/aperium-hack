@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
-import { ReasonOutput, type Evidence } from "../src/lib/contracts";
+import { ReasonOutput, ReviewOutput, type Evidence } from "../src/lib/contracts";
 import { decrypt, encrypt } from "../src/lib/crypto";
 import { openDb, type DB } from "../src/lib/db";
 import { checkEvidence, evidenceHref, keepSupported, quoteLine } from "../src/lib/evidence";
@@ -69,13 +69,37 @@ describe("Reason output contract", () => {
       client_guess: { client_id: "harbor-pine", name: "Harbor & Pine", confidence: 0.95 },
       project_match: { project_id: "harbor-lobby", confidence: 0.9 },
       signals: [
-        { type: "ask", text: "Revised quote", due_at: "2026-10-23", evidence: [{ kind: "message", message_id: "m1", quote: "revised quote" }] },
+        { tmp_id: "s1", type: "ask", text: "Revised quote", due_at: "2026-10-23", evidence: [{ kind: "message", message_id: "m1", quote: "revised quote" }] },
       ],
     };
     const ok = ReasonOutput.parse(base);
     expect(ok.insights).toEqual([]);
+    expect(ok.closes_signal_ids).toEqual([]);
+    expect(ok.signals[0].date_basis).toBeNull();
     expect(ok.project_match.new_project_name).toBeNull();
     expect(() => ReasonOutput.parse({ ...base, signals: [{ ...base.signals[0], evidence: [] }] })).toThrow();
+    const { tmp_id: _dropped, ...noId } = base.signals[0];
+    expect(() => ReasonOutput.parse({ ...base, signals: [noId] })).toThrow();
+  });
+});
+
+describe("Review output contract", () => {
+  it("matches verdicts by tmp_id and carries conflicting evidence", () => {
+    const out = ReviewOutput.parse({
+      items: [
+        {
+          tmp_id: "s1",
+          verdict: "block",
+          score: 0.1,
+          reason: "PDF p.2: Levels 1-2",
+          conflicting_evidence: [{ kind: "attachment_page", attachment_id: "m1:2", page: 2, quote: "Levels 1-2" }],
+        },
+        { tmp_id: "s2", verdict: "pass", score: 0.9, reason: "Quoted verbatim" },
+      ],
+    });
+    expect(out.items[0].conflicting_evidence[0]).toMatchObject({ kind: "attachment_page", page: 2 });
+    expect(out.items[1].conflicting_evidence).toEqual([]);
+    expect(out.items[1].revised_text).toBeNull();
   });
 });
 

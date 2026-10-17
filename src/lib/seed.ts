@@ -98,7 +98,7 @@ export function applySeed(db: DB, seed: SeedFile): string[] {
 export function resetToSeed(db: DB, seed: SeedFile, opts: { disconnect?: boolean } = {}): string[] {
   const seededProjects = seed.projects.map((p) => p.id);
   db.transaction(() => {
-    db.exec(`DELETE FROM model_reviews; DELETE FROM actions; DELETE FROM insights; DELETE FROM signals;
+    db.exec(`DELETE FROM pipeline_runs; DELETE FROM model_reviews; DELETE FROM actions; DELETE FROM insights; DELETE FROM signals;
              DELETE FROM attachments; DELETE FROM messages; DELETE FROM threads;
              DELETE FROM eval_runs; DELETE FROM audit_events;`);
     db.prepare(`DELETE FROM projects WHERE id NOT IN (${seededProjects.map(() => "?").join(",")})`).run(...seededProjects);
