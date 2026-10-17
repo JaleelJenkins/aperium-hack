@@ -123,13 +123,13 @@ interface AttachmentRow {
 export async function runExtract(
   db: DB,
   extractor: Extractor,
-  opts: { dataDir?: string; limit?: number } = {},
+  opts: { dataDir?: string; limit?: number; onlyId?: string } = {},
 ): Promise<ExtractResult> {
   const dataDir = opts.dataDir ?? config.dataDir;
   const result: ExtractResult = { messages: 0, attachments: 0, failed: [] };
   const messages = db
-    .prepare(`SELECT gmail_message_id AS id FROM messages WHERE status = 'ingested' ORDER BY received_at LIMIT ?`)
-    .all(opts.limit ?? 50) as { id: string }[];
+    .prepare(`SELECT gmail_message_id AS id FROM messages WHERE status = 'ingested' AND (? IS NULL OR gmail_message_id = ?) ORDER BY received_at LIMIT ?`)
+    .all(opts.onlyId ?? null, opts.onlyId ?? null, opts.limit ?? 50) as { id: string }[];
 
   for (const { id } of messages) {
     const atts = db

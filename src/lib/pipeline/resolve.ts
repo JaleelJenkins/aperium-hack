@@ -207,15 +207,15 @@ export function clientFor(db: DB, email: string | null): { id: string; name: str
   return hit ? { id: hit.id, name: hit.name } : null;
 }
 
-export async function runResolve(db: DB, matcher: Matcher, opts: { limit?: number; threshold?: number } = {}): Promise<ResolveResult> {
+export async function runResolve(db: DB, matcher: Matcher, opts: { limit?: number; threshold?: number; onlyId?: string } = {}): Promise<ResolveResult> {
   const threshold = opts.threshold ?? PROJECT_MATCH_THRESHOLD;
   const result: ResolveResult = { assigned: [], inherited: 0, cards: [], failed: [] };
   const pending = db
     .prepare(
       `SELECT gmail_message_id AS id, thread_id, status, sender_email, sender_name, subject, clean_text, received_at
-         FROM messages WHERE status IN ('ingested', 'extracted') ORDER BY received_at LIMIT ?`,
+         FROM messages WHERE status IN ('ingested', 'extracted') AND (? IS NULL OR gmail_message_id = ?) ORDER BY received_at LIMIT ?`,
     )
-    .all(opts.limit ?? 100) as PendingMessage[];
+    .all(opts.onlyId ?? null, opts.onlyId ?? null, opts.limit ?? 100) as PendingMessage[];
 
   for (const m of pending) {
     try {

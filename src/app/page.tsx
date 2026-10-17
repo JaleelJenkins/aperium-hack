@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getBoard, type BoardFilter } from "@/lib/board";
+import { pipelineBusy } from "@/lib/cycle";
 import { getDb } from "@/lib/db";
 import { caughtClaims, caughtCount, inspect, parseInspectRef } from "@/lib/inspect";
 import { BoardView, type HrefFor } from "./components/Board";
@@ -48,7 +49,8 @@ export default async function BoardPage({
 
   return (
     <div className="board-page">
-      <AutoRefresh />
+      {/* Refresh fast while the pipeline is moving cards, slowly otherwise. */}
+      <AutoRefresh everyMs={pipelineBusy(db) ? 3000 : 15000} />
       <ConnectionBanners {...flash} />
 
       <div className="page-head">
