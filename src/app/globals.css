@@ -710,3 +710,102 @@ pre.raw { white-space: pre-wrap; font-family: var(--mono); font-size: 12px; colo
   .proj-foot .muted { margin-left: 0; }
   .proj-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); row-gap: 8px; }
 }
+
+/* ------------------------------------------------------ approval queue (drawer foot) */
+.drawer-foot:has(.approve-panel) { display: block; padding: 12px 16px 14px; background: var(--panel-2); }
+.approve-panel { display: flex; flex-direction: column; gap: 10px; }
+.approve-q { display: flex; gap: 6px; align-items: flex-start; font-size: 12.5px; color: var(--text-secondary); line-height: 1.45; }
+.approve-q svg { flex: none; margin-top: 2px; color: var(--accent-reviewer); }
+.approve-buttons { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.approve-buttons .btn.primary { min-width: 112px; justify-content: center; }
+.btn.danger { color: var(--status-block-text); border-color: var(--status-block-border); background: var(--panel); }
+.btn.danger:hover { background: var(--status-block-bg); }
+.btn.ghost.danger { border-color: transparent; background: transparent; }
+.btn.ghost.danger:hover { background: var(--status-block-bg); color: var(--status-block-text); }
+.approve-form { display: flex; flex-direction: column; gap: 8px; }
+.approve-form label, .rule-form label { display: flex; flex-direction: column; gap: 4px; }
+.approve-form label > span, .rule-form label > span {
+  font-family: var(--mono); font-size: 10px; font-weight: 500; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted);
+}
+.approve-form label.check { flex-direction: row; align-items: flex-start; gap: 8px; font-size: 12.5px; color: var(--text); }
+.approve-form label.check > span { font: inherit; text-transform: none; letter-spacing: 0; color: inherit; }
+.approve-form label.check input { margin-top: 2px; accent-color: var(--accent-reviewer); }
+.approve-form input:not([type]), .approve-form textarea, .approve-form select,
+.rule-form input:not([type]), .rule-form textarea, .rule-form select, .np-row input, .np-row select {
+  width: 100%; min-width: 0; font: 13px/1.45 var(--sans); color: var(--text); background: var(--panel);
+  border: 1px solid var(--line-strong); border-radius: 7px; padding: 7px 9px; outline: none;
+}
+.approve-form textarea, .rule-form textarea { resize: vertical; }
+.approve-form :is(input, textarea, select):focus, .rule-form :is(input, textarea, select):focus, .np-row :is(input, select):focus {
+  border-color: var(--accent-evidence); box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+.approve-hint { font-size: 11.5px; }
+.rule-from-reject { display: grid; gap: 8px; padding: 10px; border: 1px dashed var(--accent-reviewer); border-radius: 8px; background: var(--shield-soft); }
+.approve-status { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 12.5px; color: var(--muted); }
+.np-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.np-dismiss { align-self: flex-start; }
+
+/* caught-by-review rule link */
+.rule-chip {
+  display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: 4px; font-family: var(--mono); font-size: 10px;
+  font-weight: 500; letter-spacing: 0.04em; color: var(--accent-reviewer); background: var(--shield-soft); border: 1px solid #ddd3fb;
+}
+.rule-chip:hover { text-decoration: none; background: #e9e2fc; }
+
+/* ------------------------------------------------------ review rules page */
+.rules-page .page-head .muted { max-width: 760px; }
+.flow { list-style: none; margin: 0 0 18px; padding: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0;
+  border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); overflow: hidden; counter-reset: step; }
+.flow li { display: flex; gap: 8px; align-items: flex-start; padding: 10px 12px; font-size: 12px; color: var(--muted); line-height: 1.4; position: relative; }
+.flow li + li { border-left: 1px solid var(--line); }
+.flow li svg { flex: none; margin-top: 1px; color: var(--accent-reviewer); }
+.flow li strong { color: var(--text); font-weight: 600; display: block; }
+.flow li.you { background: var(--panel-2); }
+.flow li.you svg { color: var(--accent-brand); }
+.rules-layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 18px; align-items: start; }
+.rules-list { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.rules-list-head { display: flex; align-items: baseline; gap: 12px; }
+.rules-list-head h2, .rules-new h2 { font-size: 15px; font-weight: 650; margin: 0; }
+.rules-list-head .muted { font-size: 11.5px; margin-left: auto; }
+.rule-group { display: flex; flex-direction: column; gap: 8px; }
+.rule-card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.rule-card:target { border-color: var(--accent-reviewer); box-shadow: 0 0 0 3px rgba(109, 40, 217, 0.12); }
+.rule-card.off { opacity: 0.6; }
+.rule-card header { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.rule-meta { font-size: 11.5px; color: var(--muted); }
+.chip.rule-kind.instruction { color: var(--accent-reviewer); background: var(--shield-soft); border-color: #ddd3fb; }
+.chip.rule-kind.block_phrase, .chip.rule-kind.block_domain { color: var(--status-block-text); background: var(--status-block-bg); border-color: var(--status-block-border); }
+.rule-body { display: flex; gap: 12px; align-items: flex-start; }
+.rule-body > p { margin: 0; font-size: 13.5px; line-height: 1.5; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.rule-body > .rule-form { flex: 1; }
+.rule-actions { display: flex; gap: 4px; align-items: center; flex: none; }
+.switch { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); cursor: pointer; padding: 0 6px; }
+.switch input { accent-color: var(--accent-reviewer); }
+.rule-card footer { display: flex; gap: 12px; justify-content: space-between; flex-wrap: wrap; font-size: 11px; color: var(--faint); font-family: var(--mono); }
+.rule-card footer svg { vertical-align: -1px; }
+.rules-new { position: sticky; top: 16px; display: flex; flex-direction: column; gap: 12px; }
+.rule-form { display: flex; flex-direction: column; gap: 10px; }
+.rule-help { margin: -4px 0 0; font-size: 12px; line-height: 1.45; }
+.rule-form > .btn.primary { justify-content: center; }
+
+@media (max-width: 1100px) {
+  .flow { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .flow li:nth-child(4) { border-left: 0; }
+  .flow li:nth-child(n + 4) { border-top: 1px solid var(--line); }
+}
+@media (max-width: 860px) {
+  .rules-layout { grid-template-columns: minmax(0, 1fr); }
+  .rules-new { position: static; order: -1; }
+}
+@media (max-width: 700px) {
+  .flow { grid-template-columns: minmax(0, 1fr); }
+  .flow li + li { border-left: 0; border-top: 1px solid var(--line); }
+  .rule-body { flex-direction: column; gap: 8px; }
+  .rule-actions { align-self: flex-end; }
+}
+.diff-label { flex-wrap: wrap; row-gap: 4px; }
+.diff-label .rule-chip, .diff-label .verdict { white-space: nowrap; }
+@media (max-width: 860px) {
+  .side-nav { flex-wrap: wrap; }
+  .side-nav a { white-space: nowrap; }
+}

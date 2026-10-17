@@ -405,6 +405,35 @@ const MIGRATIONS: string[] = [
   CREATE INDEX IF NOT EXISTS attachments_status_kind_idx ON attachments(status, kind);
   CREATE INDEX IF NOT EXISTS route_decisions_src_msg_idx ON route_decisions(source, message_id);
   `,
+
+  /* 007: team review rules (the approval review step) and human approval decisions */ `
+  -- Rules the team writes once and every future email is held to. instruction rules are
+  -- given to Reason (to follow) and Review (to enforce); block_phrase / block_domain rules
+  -- are checked in code after Review, before anything reaches the approval queue.
+  CREATE TABLE review_rules (
+    id          TEXT PRIMARY KEY,
+    code        TEXT NOT NULL UNIQUE,                 -- R1, R2 ... shown in "Caught by review"
+    scope       TEXT NOT NULL,                        -- global | client | project
+    client_id   TEXT REFERENCES clients(id) ON DELETE CASCADE,
+    project_id  TEXT REFERENCES projects(id) ON DELETE CASCADE,
+    applies_to  TEXT NOT NULL DEFAULT 'all',          -- all | signal | insight | action | draft_reply | internal_task
+    kind        TEXT NOT NULL,                        -- instruction | block_phrase | block_domain
+    text        TEXT NOT NULL,                        -- the instruction, phrase or domain
+    on_violation TEXT NOT NULL DEFAULT 'block',       -- instruction rules: block | revise
+    enabled     INTEGER NOT NULL DEFAULT 1,
+    source      TEXT NOT NULL DEFAULT 'manual',       -- manual | rejection
+    source_ref  TEXT,                                 -- action id a rejection rule came from
+    created_by  TEXT NOT NULL DEFAULT 'user',
+    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    hits        INTEGER NOT NULL DEFAULT 0,
+    last_hit_at TEXT
+  );
+  CREATE INDEX review_rules_scope_idx ON review_rules(scope, client_id, project_id);
+
+  ALTER TABLE model_reviews ADD COLUMN rule_id TEXT REFERENCES review_rules(id) ON DELETE SET NULL;
+  -- Edits keep what the model proposed, so the scoreboard can measure how much people change.
+  ALTER TABLE actions ADD COLUMN original_payload_json TEXT;
+  `,
 ];
 
 export function openDb(file: string): DB {

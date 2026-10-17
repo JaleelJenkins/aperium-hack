@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { CaughtClaim, Inspection, SourceView } from "@/lib/inspect";
 import { ago, dueText, modelShort } from "../format";
+import { ApprovalPanel } from "./ApprovalPanel";
 import { KIND_LABEL, type HrefFor } from "./Board";
 import { DrawerKeys } from "./DrawerKeys";
 import { Icon } from "./Icon";
@@ -88,6 +89,24 @@ export function Source({ src }: { src: SourceView }) {
   );
 }
 
+/** What a person changed before approving, against the model's version. */
+function EditedNote({ a }: { a: NonNullable<Inspection["approval"]> }) {
+  const o = a.original!;
+  const p = a.payload;
+  const changed = (["to", "subject", "body", "title", "notes"] as const).filter((k) => JSON.stringify(o[k] ?? "") !== JSON.stringify(p[k] ?? ""));
+  if (!changed.length) return null;
+  return (
+    <div className="muted" style={{ fontSize: 12, marginTop: 6, display: "grid", gap: 4 }}>
+      <span>Edited by a person before approval. The model proposed:</span>
+      {changed.map((k) => (
+        <span key={k}>
+          <span className="mono">{k}</span>: <span className="claim-struck">{Array.isArray(o[k]) ? (o[k] as string[]).join(", ") : (o[k] as string) || "(empty)"}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
 const VERDICT_LABEL: Record<string, string> = { pass: "Verified", revise: "Revised", block: "Blocked" };
 
 export function InspectorDrawer({ item, hrefFor }: { item: Inspection; hrefFor: HrefFor }) {
@@ -103,11 +122,15 @@ export function InspectorDrawer({ item, hrefFor }: { item: Inspection; hrefFor: 
         </>
       }
       foot={
-        item.messageHref && (
-          <a className="btn" href={item.messageHref}>
-            <Icon name="external" size={13} />
-            Open full message
-          </a>
+        item.approval ? (
+          <ApprovalPanel key={item.approval.actionId} a={item.approval} />
+        ) : (
+          item.messageHref && (
+            <a className="btn" href={item.messageHref}>
+              <Icon name="external" size={13} />
+              Open full message
+            </a>
+          )
         )
       }
     >
@@ -134,9 +157,16 @@ export function InspectorDrawer({ item, hrefFor }: { item: Inspection; hrefFor: 
             {item.draft.to.length > 0 && <div className="to">To {item.draft.to.join(", ")}</div>}
             {item.draft.body || item.draft.subject}
           </div>
+          {item.approval?.original && <EditedNote a={item.approval} />}
           {item.kind === "draft_reply" && (
             <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
               Approving creates a Gmail draft in this thread (<span className="mono">drafts.create</span>). Nothing is sent.
+              {item.messageHref && (
+                <>
+                  {" "}
+                  <a href={item.messageHref}>Open the full message</a>.
+                </>
+              )}
             </div>
           )}
         </div>
@@ -252,6 +282,11 @@ export function ClaimDiff({ c }: { c: CaughtClaim }) {
             <Icon name="shield" size={11} />
             {c.reviewer ? `Review · ${modelShort(c.reviewer)}` : BLOCKED_BY[c.blockedBy ?? "review"]}
             <span className="verdict block">Blocked</span>
+            {c.rule && (
+              <a className="rule-chip" href={`/rules#rule-${c.rule.code}`} title={c.rule.text}>
+                Rule {c.rule.code}
+              </a>
+            )}
           </div>
           <div>{c.notes}</div>
         </div>

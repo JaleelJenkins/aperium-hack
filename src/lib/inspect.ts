@@ -59,6 +59,27 @@ export interface Inspection {
     reason: string | null;
   } | null;
   messageHref: string | null;
+  /** Present for actions: what the approval controls need. */
+  approval: ApprovalInfo | null;
+}
+
+export interface ApprovalInfo {
+  actionId: string;
+  type: "draft_reply" | "internal_task" | "new_project";
+  status: string;
+  error: string | null;
+  decidedBy: string | null;
+  decidedAt: string | null;
+  decisionReason: string | null;
+  gmailDraftId: string | null;
+  /** The model's version, when a person edited it. */
+  original: { to?: string[]; subject?: string; body?: string; title?: string; notes?: string } | null;
+  payload: { to?: string[]; subject?: string; body?: string; title?: string; notes?: string };
+  /** new_project cards: where it could be filed. */
+  newProject: { suggestedName: string; clientId: string | null; clientName: string | null; closestProjectId: string | null; projects: { id: string; name: string }[]; reason: string | null } | null;
+  /** For "save as rule" on reject. */
+  projectName: string | null;
+  clientName: string | null;
 }
 
 export interface CaughtClaim {
@@ -66,6 +87,8 @@ export interface CaughtClaim {
   claim: string;
   notes: string;
   blockedBy: "review" | "verify" | "policy" | null;
+  /** Team rule that decided it, if any. */
+  rule: { code: string; text: string } | null;
   producer: string | null;
   reviewer: string | null;
   score: number | null;
@@ -185,6 +208,7 @@ export function inspect(db: DB, ref: InspectRef): Inspection | null {
         reason: s.review_reason,
       },
       messageHref: s.message_id ? `/messages/${encodeURIComponent(s.message_id)}` : null,
+      approval: null,
     };
   }
 
@@ -194,6 +218,8 @@ export function inspect(db: DB, ref: InspectRef): Inspection | null {
           id: string; project_id: string | null; message_id: string | null; type: CardKind; payload_json: string;
           status: string; evidence_json: string; produced_by_model: string; reviewed_by_model: string | null;
           review_verdict: string | null; review_score: number | null; review_reason: string | null;
+          thread_id: string | null; error: string | null; decided_by: string | null; decided_at: string | null;
+          decision_reason: string | null; gmail_draft_id: string | null; original_payload_json: string | null;
         }
       | undefined;
     if (!a) return null;
@@ -225,6 +251,7 @@ export function inspect(db: DB, ref: InspectRef): Inspection | null {
         reason: a.review_reason,
       },
       messageHref: a.message_id ? `/messages/${encodeURIComponent(a.message_id)}` : null,
+      approval: approvalInfo(db, a, p),
     };
   }
 
@@ -246,6 +273,7 @@ export function inspect(db: DB, ref: InspectRef): Inspection | null {
     sources: src ? [src] : [],
     audit: null,
     messageHref: link.href,
+    approval: null,
   };
 }
 
@@ -253,14 +281,15 @@ export function inspect(db: DB, ref: InspectRef): Inspection | null {
 export function caughtClaims(db: DB): CaughtClaim[] {
   const rows = db
     .prepare(
-      `SELECT id, project_id, message_id, produced_by_model, reviewer_model, blocked_by, score, notes, claim_json,
-              conflicting_evidence_json, at
-         FROM model_reviews WHERE verdict = 'block' ORDER BY at DESC`,
+      `SELECT mr.id, mr.project_id, mr.message_id, mr.produced_by_model, mr.reviewer_model, mr.blocked_by, mr.score, mr.notes, mr.claim_json,
+              mr.conflicting_evidence_json, mr.at, rr.code AS rule_code, rr.text AS rule_text
+         FROM model_reviews mr LEFT JOIN review_rules rr ON rr.id = mr.rule_id
+        WHERE mr.verdict = 'block' ORDER BY mr.at DESC`,
     )
     .all() as {
     id: string; project_id: string | null; message_id: string | null; produced_by_model: string | null; reviewer_model: string | null;
     blocked_by: CaughtClaim["blockedBy"]; score: number | null; notes: string | null; claim_json: string | null;
-    conflicting_evidence_json: string | null; at: string;
+    conflicting_evidence_json: string | null; at: string; rule_code: string | null; rule_text: string | null;
   }[];
   const model = modelNames(db);
   return rows.map((r) => {
@@ -271,6 +300,7 @@ export function caughtClaims(db: DB): CaughtClaim[] {
       claim: claim.text ?? claim.title ?? claim.payload?.subject ?? "(claim)",
       notes: r.notes ?? "",
       blockedBy: r.blocked_by,
+      rule: r.rule_code ? { code: r.rule_code, text: r.rule_text ?? "" } : null,
       producer: model(r.produced_by_model),
       reviewer: model(r.reviewer_model),
       score: r.score,
@@ -284,4 +314,48 @@ export function caughtClaims(db: DB): CaughtClaim[] {
 
 export function caughtCount(db: DB): number {
   return (db.prepare(`SELECT COUNT(*) AS n FROM model_reviews WHERE verdict = 'block'`).get() as { n: number }).n;
+}
+
+function approvalInfo(
+  db: DB,
+  a: {
+    id: string; type: CardKind; status: string; project_id: string | null; error: string | null; decided_by: string | null;
+    decided_at: string | null; decision_reason: string | null; gmail_draft_id: string | null; original_payload_json: string | null;
+    payload_json: string;
+  },
+  payload: ApprovalInfo["payload"],
+): ApprovalInfo {
+  const type = a.type as ApprovalInfo["type"];
+  const project = a.project_id
+    ? (db.prepare(`SELECT p.name, c.name AS client_name FROM projects p JOIN clients c ON c.id = p.client_id WHERE p.id = ?`).get(a.project_id) as
+        | { name: string; client_name: string }
+        | undefined)
+    : undefined;
+  let newProject: ApprovalInfo["newProject"] = null;
+  if (type === "new_project") {
+    const np = parseJson<{ suggested_name?: string; client_id?: string | null; closest_project_id?: string | null; reason?: string }>(a.payload_json, {});
+    const clientId = np.client_id ?? null;
+    const clientName = clientId ? ((db.prepare(`SELECT name FROM clients WHERE id = ?`).get(clientId) as { name: string } | undefined)?.name ?? null) : null;
+    const projects = (
+      clientId
+        ? db.prepare(`SELECT id, name FROM projects WHERE client_id = ? AND status != 'archived' ORDER BY name`).all(clientId)
+        : db.prepare(`SELECT p.id, c.name || ' / ' || p.name AS name FROM projects p JOIN clients c ON c.id = p.client_id WHERE p.status != 'archived' ORDER BY c.name, p.name`).all()
+    ).map((r) => ({ ...(r as { id: string; name: string }) })); // plain objects: this crosses into a client component
+    newProject = { suggestedName: np.suggested_name ?? "", clientId, clientName, closestProjectId: np.closest_project_id ?? null, projects, reason: np.reason ?? null };
+  }
+  return {
+    actionId: a.id,
+    type,
+    status: a.status,
+    error: a.error,
+    decidedBy: a.decided_by,
+    decidedAt: a.decided_at,
+    decisionReason: a.decision_reason,
+    gmailDraftId: a.gmail_draft_id,
+    original: a.original_payload_json ? parseJson(a.original_payload_json, null) : null,
+    payload,
+    newProject,
+    projectName: project?.name ?? null,
+    clientName: project?.client_name ?? null,
+  };
 }

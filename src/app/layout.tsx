@@ -23,6 +23,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   const db = getDb();
   const clients = listClientsForNav(db);
   const caught = caughtCount(db);
+  const rules = (db.prepare(`SELECT COUNT(*) AS n FROM review_rules WHERE enabled = 1`).get() as { n: number }).n;
+  const approvals = (db.prepare(`SELECT COUNT(*) AS n FROM actions WHERE status = 'proposed'`).get() as { n: number }).n;
+  // "Needs approval" opens the oldest waiting item in the drawer, so the queue is one click per decision.
+  const nextApproval = (db.prepare(`SELECT id FROM actions WHERE status = 'proposed' ORDER BY created_at LIMIT 1`).get() as { id: string } | undefined)?.id;
   return (
     <html lang="en" className={`${serif.variable} ${sans.variable} ${mono.variable}`}>
       <body>
@@ -62,10 +66,20 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
             <div className="side-label">Queues &amp; trust</div>
             <nav className="side-nav queues">
+              <NavLink href={nextApproval ? `/?open=action:${nextApproval}` : "/?view=attention"} title="Opens the next draft, task or New project? card waiting on you">
+                <Icon name="mail" size={15} />
+                Needs approval
+                <span className={`side-count${approvals ? " hot" : ""}`}>{approvals}</span>
+              </NavLink>
               <NavLink href="/?open=caught">
                 <Icon name="shield" size={15} />
                 Caught by review
                 <span className={`side-count${caught ? " hot" : ""}`}>{caught}</span>
+              </NavLink>
+              <NavLink href="/rules">
+                <Icon name="check" size={15} />
+                Review rules
+                <span className="side-count">{rules}</span>
               </NavLink>
               <NavLink href="/scoreboard">
                 <Icon name="gauge" size={15} />

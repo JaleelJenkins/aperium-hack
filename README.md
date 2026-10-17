@@ -51,8 +51,10 @@ Each stage picks up `messages.status` from the previous one: `ingested → extra
 | | New thread matched against project summaries with confidence; below 0.7 → "New project?" card | P0 | ✅ | `src/lib/pipeline/resolve.ts` |
 | **F4 State & insights** | Incremental project state update | P0 | ⬜ | `projects`, `signals` |
 | | Insight rules: unanswered ask, deadline w/o commitment, overdue commitment | P0 | ⬜ | `insights` |
-| **F5 Action queue** | Draft reply + internal task; proposed → approved/edited/rejected → executed/failed; reject needs a reason | P0 | ⬜ | `actions` |
-| | Executor calls `drafts.create` in thread only, never `messages.send` | P0 | ⬜ scope granted | `gmail.compose` |
+| **F5 Action queue** | Draft reply + internal task; proposed → approved/edited/rejected → executed/failed; reject needs a reason. Approve / Edit / Reject in the evidence drawer | P0 | ✅ | `src/lib/approvals.ts`, `src/app/components/ApprovalPanel.tsx` |
+| | "New project?" cards: file to a project, create one, or dismiss | P0 | ✅ | `src/lib/approvals.ts` |
+| | Executor calls `drafts.create` in thread only, never `messages.send`; approved tasks become "We owe" items | P0 | ✅ | `src/lib/pipeline/execute.ts` |
+| | Review rules: team-written rules applied in Reason, Review and a code gate; rejections can become rules | P0+ | ✅ | `src/lib/rules.ts`, `src/app/rules/` |
 | | Every decision audited | P0 | ✅ table + helper | `audit_events`, `audit()` |
 | **F6 Views** | Portfolio board: client/project swimlanes × workflow columns (Triage · Waiting on us · Waiting on client · Needs approval · Done), sorted by risk | P0 | ✅ | `src/app/page.tsx`, `src/lib/board.ts` |
 | | Evidence drawer · Caught by review | P0 | ✅ | `src/app/components/Drawer.tsx`, `src/lib/inspect.ts` |
@@ -279,6 +281,27 @@ Then run the pipeline once to process what's waiting:
 ```bash
 npm run pipeline
 ```
+
+## Approvals and review rules
+
+**Approving.** Click any card in **Needs approval** (or **Needs approval** in the sidebar, which opens the oldest waiting item). The drawer shows the draft, its evidence and the model review, with three buttons:
+- **Approve**: a draft reply becomes a Gmail draft in the original thread (`drafts.create` with `In-Reply-To`); open Gmail and send it yourself. An internal task becomes an open item in **Waiting on us**.
+- **Edit**: change recipients, subject and body (or the task) and approve the result. The model's version is kept and shown struck through.
+- **Reject**: a reason is required. Tick **Save as a review rule** to turn the reason into a rule for this project, this client, or every project.
+
+Recipients are checked again at approval and at execution: only known contacts on the thread. If the draft can't be created (Gmail not connected, `gmail.compose` not granted), the card shows the error with **Retry**. The worker also runs the executor after every poll.
+
+**"New project?" cards**: file the thread to one of the client's projects (closest match preselected), create a new project, or dismiss it as not client work.
+
+**Review rules** (`/rules`, "Review rules" in the sidebar) are the approval review step: the team writes a rule once and every email reviewed afterwards is held to it.
+
+| Rule type | Where it applies | Example |
+|---|---|---|
+| Instruction | Reason is told to follow it; the review model enforces it, blocks or revises (your choice per rule) and names the rule, e.g. `R1: promises a date the PM hasn't confirmed` | "Never promise a delivery date in a reply unless the PM confirmed it in this thread." |
+| Blocked phrase | Checked in code after review, on the final text | `guaranteed` |
+| Blocked domain | Checked in code after review, on draft and task recipients | `lumen-clinic-payments.com` |
+
+Rules are scoped to every project, one client's projects, or one project, and can target everything, signals, insights, actions, drafts or tasks. Each one counts its catches; blocks show **Rule R1** in Caught by review, linked to the rule. Turn a rule off to keep it without applying it.
 
 ## Scripts
 

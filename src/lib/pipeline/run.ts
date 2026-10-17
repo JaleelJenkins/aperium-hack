@@ -73,6 +73,7 @@ export function describe(r: PipelineResult): string[] {
       out.push(
         `  ${m.message} [${m.pair}] ${c.signals} signal(s), ${c.insights} insight(s), ${c.actions} action(s)` +
           (c.revised ? `, ${c.revised} revised` : "") +
+          (c.byRule ? `, ${c.byRule} by team rules` : "") +
           (blocked ? `, ${blocked} caught (review ${c.blocked.review}, verify ${c.blocked.verify}, policy ${c.blocked.policy})` : "") +
           (c.closed ? `, closed ${c.closed}` : "") +
           ` · $${m.cost_usd.toFixed(4)}` +
