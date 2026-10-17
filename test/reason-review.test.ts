@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import type { DB } from "../src/lib/db";
 import { getBoard } from "../src/lib/board";
-import { caughtClaims } from "../src/lib/inspect";
+import { caughtClaims, inspect } from "../src/lib/inspect";
 import { heuristicMatcher } from "../src/lib/pipeline/resolve";
 import type { Llm, LlmResult, ToolCall } from "../src/lib/pipeline/llm";
 import { anthropicToOpenRouter, routeModel } from "../src/lib/pipeline/models";
@@ -200,6 +200,34 @@ describe("Reason + Review on the seed inbox", () => {
     // Idempotent: nothing left to do.
     const again = await runPipeline(db, { extractor: fakeExtractor, matcher: heuristicMatcher(), reasonReview: { llm } }, { dataDir, now: ANCHOR });
     expect(again.reasonReview).toMatchObject({ reasoned: 0, reviewed: 0 });
+  });
+
+  it("saves each model's reasoning note and shows it with the routing decision in the drawer", async () => {
+    const { db, dataDir, idOf } = await seededDb();
+    const base = scriptedLlm(db, idOf);
+    const llm: Llm = {
+      async call<T>(req: ToolCall<T>): Promise<LlmResult<T>> {
+        const r = await base.call(req);
+        const stage = (req.hint ?? "").split(":")[0];
+        const note = stage === "reason" ? "Reason note: read the email and the PDF." : "Review note: checked every page.";
+        return { ...r, input: { ...(r.input as object), reasoning: `  ${note}  ` } as T };
+      },
+    };
+    await runPipeline(db, { extractor: fakeExtractor, matcher: heuristicMatcher(), reasonReview: { llm } }, { dataDir, now: ANCHOR });
+
+    const harborId = idOf.get("harbor-01-floor-plan")!;
+    const run = db.prepare(`SELECT reason_trace, review_trace FROM pipeline_runs WHERE message_id = ?`).get(harborId);
+    expect(run).toEqual({ reason_trace: "Reason note: read the email and the PDF.", review_trace: "Review note: checked every page." });
+
+    const sig = db.prepare(`SELECT id FROM signals WHERE message_id = ? LIMIT 1`).get(harborId) as { id: string };
+    const item = inspect(db, { type: "signal", id: sig.id })!;
+    expect(item.routing).toMatchObject({ recorded: true });
+    expect(item.routing!.pairLabel).toBeTruthy();
+    expect(item.reasoning).toMatchObject({ reasonNote: "Reason note: read the email and the PDF.", reviewNote: "Review note: checked every page." });
+    expect(item.reasoning!.reasonModel).toBeTruthy();
+
+    // Email view carries the same trail.
+    expect(inspect(db, { type: "email", id: harborId })!.reasoning!.reviewNote).toBe("Review note: checked every page.");
   });
 
   it("single-pass pair: items are stored unreviewed (verdict null); verify/policy still apply", async () => {
