@@ -55,3 +55,33 @@ describe("cleanBody", () => {
     expect(cleanBody(raw)).toBe(raw);
   });
 });
+
+describe("cleanBody with forwards", () => {
+  it("keeps a forwarded message (and its headers) that sits below the signature", () => {
+    const raw = [
+      "Flagging this note from Raj.",
+      "",
+      "Tom",
+      "--",
+      "Tom Becker",
+      "Fleet Manager",
+      "",
+      "---------- Forwarded message ---------",
+      "From: Raj Patel <raj@vectorfreight.io>",
+      "Date: Thu, Sep 24, 2026 at 9:00 AM",
+      "Subject: Pilot go-live",
+      "To: Tom Becker <tom@vectorfreight.io>",
+      "",
+      "We're good to launch the pilot next Friday.",
+    ].join("\n");
+    const out = cleanBody(raw);
+    expect(out).toContain("Flagging this note from Raj.");
+    expect(out).not.toContain("Fleet Manager");
+    expect(out).toContain("Date: Thu, Sep 24, 2026 at 9:00 AM");
+    expect(out).toContain("We're good to launch the pilot next Friday.");
+  });
+
+  it("still cuts a signature when no forward follows", () => {
+    expect(cleanBody("Thanks!\n--\nJane\nVP")).toBe("Thanks!");
+  });
+});

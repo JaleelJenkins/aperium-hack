@@ -20,6 +20,9 @@ const OUTLOOK_RULE = /^_{10,}\s*$/;
 const OUTLOOK_FROM = /^\*?From:\*?\s.+/i;
 const OUTLOOK_HEADER = /^\*?(Sent|Date|To|Subject|Cc):\*?\s/i;
 const SIGNATURE_DELIM = /^--\s?$/;
+// Gmail: "---------- Forwarded message ---------"; Apple Mail: "Begin forwarded message:"
+const FORWARDED = /^(-{3,}\s*Forwarded message\s*-{3,}|Begin forwarded message:)\s*$/i;
+const FORWARD_HEADER = /^\*?(From|Date|Sent|Subject|To|Cc):\*?\s/i;
 const MOBILE_FOOTER = /^Sent from my (iPhone|iPad|Android|Galaxy|mobile device)|^Get Outlook for (iOS|Android)/i;
 
 export function normalize(text: string): string {
@@ -45,7 +48,22 @@ export function cleanBody(raw: string): string {
     if (ORIGINAL_MESSAGE.test(trimmed)) break;
     if (OUTLOOK_RULE.test(trimmed) && looksLikeOutlookHeader(lines, i + 1)) break;
     if (OUTLOOK_FROM.test(trimmed) && looksLikeOutlookHeader(lines, i)) break;
-    if (SIGNATURE_DELIM.test(line)) break;
+
+    // A forward is new to this thread: keep its marker and header block (its
+    // Date: line is what dates phrases like "next Friday" inside it).
+    if (FORWARDED.test(trimmed)) {
+      kept.push(line);
+      while (i + 1 < lines.length && FORWARD_HEADER.test(lines[i + 1].trim())) kept.push(lines[++i]);
+      continue;
+    }
+    // Signature: drop it, but if a forwarded message follows (signatures sit
+    // above the forward in Gmail), skip ahead to the forward instead of stopping.
+    if (SIGNATURE_DELIM.test(line)) {
+      const fwd = lines.findIndex((l, j) => j > i && FORWARDED.test(l.trim()));
+      if (fwd === -1) break;
+      i = fwd - 1;
+      continue;
+    }
 
     if (trimmed.startsWith(">")) continue;
     if (MOBILE_FOOTER.test(trimmed)) continue;

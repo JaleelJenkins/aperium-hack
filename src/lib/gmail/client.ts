@@ -12,6 +12,13 @@ export const GMAIL_SCOPES = [
   "https://www.googleapis.com/auth/gmail.compose",
 ];
 
+/**
+ * Only for `npm run seed:inbox`: lets the seeder place demo emails into the
+ * test inbox with messages.insert. Requested only via /api/auth/google?seed=1,
+ * never by the normal Connect Gmail button.
+ */
+export const SEED_SCOPE = "https://www.googleapis.com/auth/gmail.insert";
+
 export function oauthClient(): OAuth2Client {
   assertGoogleConfigured();
   return new google.auth.OAuth2(config.google.clientId, config.google.clientSecret, config.google.redirectUri);

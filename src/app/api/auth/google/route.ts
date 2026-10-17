@@ -1,10 +1,13 @@
 import crypto from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
-import { GMAIL_SCOPES, oauthClient } from "@/lib/gmail/client";
+import { GMAIL_SCOPES, oauthClient, SEED_SCOPE } from "@/lib/gmail/client";
 
 export const runtime = "nodejs";
 
-/** Start Gmail OAuth: redirect to Google's consent screen. */
+/**
+ * Start Gmail OAuth: redirect to Google's consent screen.
+ * ?seed=1 also asks for gmail.insert, used only by `npm run seed:inbox`.
+ */
 export async function GET(req: NextRequest) {
   let client;
   try {
@@ -18,7 +21,7 @@ export async function GET(req: NextRequest) {
   const url = client.generateAuthUrl({
     access_type: "offline",
     prompt: "consent", // always return a refresh token, even on reconnect
-    scope: GMAIL_SCOPES,
+    scope: req.nextUrl.searchParams.get("seed") === "1" ? [...GMAIL_SCOPES, SEED_SCOPE] : GMAIL_SCOPES,
     include_granted_scopes: true,
     state,
   });
