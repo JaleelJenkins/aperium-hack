@@ -108,6 +108,19 @@ export function routeModel(name: string): Route | null {
   return viaAnthropic ?? viaOpenRouter;
 }
 
+/**
+ * Where to send the same call if the primary provider is rate-limited, overloaded,
+ * erroring or slow: OpenRouter, when the primary is Anthropic and an OpenRouter key is
+ * set. LLM_FALLBACK=off disables it.
+ */
+export function fallbackRoute(name: string): Route | null {
+  if (env("LLM_FALLBACK").toLowerCase() === "off") return null;
+  const primary = routeModel(name);
+  if (!primary || primary.provider !== "anthropic") return null;
+  const spec = primary.spec;
+  return spec.openrouter && hasOpenRouterKey() ? { provider: "openrouter", model: spec.openrouter, spec } : null;
+}
+
 /** True when some configured provider can serve this router model. */
 export function modelAvailable(id: ModelId): boolean {
   return routeModel(id) !== null;

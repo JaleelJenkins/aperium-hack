@@ -55,32 +55,42 @@ function render(): string {
   out.push(c.dim(`messages: ${counts.map((r) => `${r.status} ${r.n}`).join(" · ") || "none"}`));
 
   const inflight = db
-    .prepare(`SELECT stage, model, label, started_at, attempts, last_retry FROM llm_calls WHERE finished_at IS NULL ORDER BY started_at`)
-    .all() as { stage: string; model: string; label: string | null; started_at: string; attempts: number; last_retry: string | null }[];
+    .prepare(`SELECT stage, model, provider, label, started_at, attempts, last_retry FROM llm_calls WHERE finished_at IS NULL ORDER BY started_at`)
+    .all() as { stage: string; model: string; provider: string | null; label: string | null; started_at: string; attempts: number; last_retry: string | null }[];
   out.push("");
   out.push(c.bold(`In flight (${inflight.length})`));
   if (!inflight.length) out.push(c.dim(holder ? "  no model call right now (reading files / saving)" : "  nothing"));
   for (const r of inflight) {
     const ms = now - Date.parse(r.started_at);
     const flag = ms > STUCK_S * 1000 ? c.red(` STUCK? ${secs(ms)}`) : ms > (STUCK_S * 1000) / 2 ? c.yellow(` slow ${secs(ms)}`) : ` ${secs(ms)}`;
-    const retry = r.attempts > 1 ? c.yellow(`  attempt ${r.attempts} (${r.last_retry})`) : "";
+    const retry = r.provider?.includes("→")
+      ? c.yellow(`  ↪ also on OpenRouter (${r.last_retry})`)
+      : r.attempts > 1
+        ? c.yellow(`  attempt ${r.attempts} (${r.last_retry})`)
+        : "";
     out.push(`  ${r.stage.padEnd(8)} ${r.model.padEnd(20)}${flag.padEnd(14)} ${cut(r.label, 50)}${retry}`);
   }
 
   const since = new Date(now - 10 * 60_000).toISOString();
   const trouble = db
     .prepare(
-      `SELECT stage, label, ms, attempts, last_retry, error FROM llm_calls
-        WHERE started_at > ? AND (error IS NOT NULL OR attempts > 1) ORDER BY started_at DESC LIMIT 6`,
+      `SELECT stage, label, ms, attempts, last_retry, error, provider FROM llm_calls
+        WHERE started_at > ? AND (error IS NOT NULL OR attempts > 1 OR provider LIKE 'failover:%' OR provider LIKE '%→%')
+        ORDER BY started_at DESC LIMIT 8`,
     )
-    .all(since) as { stage: string; label: string | null; ms: number | null; attempts: number; last_retry: string | null; error: string | null }[];
+    .all(since) as { stage: string; label: string | null; ms: number | null; attempts: number; last_retry: string | null; error: string | null; provider: string | null }[];
   if (trouble.length) {
     out.push("");
-    out.push(c.bold("Retries and errors (last 10 min)"));
+    out.push(c.bold("Failovers, retries and errors (last 10 min)"));
     for (const t of trouble) {
+      const failover = t.provider?.startsWith("failover:") ? t.provider.slice("failover:".length) : null;
       out.push(
-        `  ${t.error ? c.red("✗") : c.yellow("↻")} ${t.stage.padEnd(8)} ${cut(t.label, 40).padEnd(40)} ` +
-          (t.error ? c.red(cut(t.error, 70)) : c.yellow(`${t.attempts} attempts, last: ${t.last_retry}`)) +
+        `  ${t.error ? c.red("✗") : failover ? c.yellow("↪") : c.yellow("↻")} ${t.stage.padEnd(8)} ${cut(t.label, 40).padEnd(40)} ` +
+          (t.error
+            ? c.red(cut(t.error, 70))
+            : failover
+              ? c.yellow(`answered by ${failover === "openrouter" ? "OpenRouter" : "Anthropic"} after: ${t.last_retry}`)
+              : c.yellow(`${t.attempts} attempts, last: ${t.last_retry}`)) +
           (t.ms != null ? c.dim(` · ${secs(t.ms)}`) : ""),
       );
     }
