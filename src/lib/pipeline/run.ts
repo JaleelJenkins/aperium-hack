@@ -4,6 +4,7 @@
  *   Resolve  -> resolved             (file the thread to a project)
  *   Reason   resolved -> reasoned    (signals, insights, actions + verify/policy checks)
  *   Review   reasoned -> reviewed    (second model over the full source; store)
+ *   Insights deterministic rules over open signals + project health (no model, always runs)
  * Called by the worker after every poll, and by `npm run pipeline`. Headless: no
  * UI involved, and every model call goes through the provider-agnostic Llm
  * (Anthropic and/or OpenRouter, see llm.ts / models.ts).
@@ -11,6 +12,7 @@
 import type { DB } from "../db";
 import { claudeExtractor, runExtract, type ExtractResult, type Extractor } from "./extract";
 import { hasApiKey, pipelineLlm } from "./llm";
+import { runInsights, type InsightsResult } from "./insights";
 import { claudeMatcher, heuristicMatcher, runResolve, type Matcher, type ResolveResult } from "./resolve";
 import { runReasonReview, type ReasonReviewDeps, type ReasonReviewResult } from "./review";
 
@@ -32,6 +34,7 @@ export interface PipelineResult {
   extract: ExtractResult | null;
   resolve: ResolveResult;
   reasonReview: ReasonReviewResult | null;
+  insights: InsightsResult;
 }
 
 export async function runPipeline(
@@ -42,7 +45,8 @@ export async function runPipeline(
   const extract = deps.extractor ? await runExtract(db, deps.extractor, opts) : null;
   const resolve = await runResolve(db, deps.matcher);
   const reasonReview = deps.reasonReview ? await runReasonReview(db, deps.reasonReview, { now: opts.now }) : null;
-  return { extract, resolve, reasonReview };
+  const insights = runInsights(db, { now: opts.now });
+  return { extract, resolve, reasonReview, insights };
 }
 
 export function describe(r: PipelineResult): string[] {
@@ -80,6 +84,13 @@ export function describe(r: PipelineResult): string[] {
           (m.latency_ms != null ? ` · ${(m.latency_ms / 1000).toFixed(1)}s since received` : ""),
       );
     }
+  }
+  const ins = r.insights;
+  if (ins.opened || ins.resolved || ins.health.length) {
+    out.push(
+      `insights: ${ins.opened} opened, ${ins.resolved} resolved` +
+        (ins.health.length ? ` · health ${ins.health.map((h) => `${h.project} ${h.from}->${h.to}`).join(", ")}` : ""),
+    );
   }
   return out;
 }

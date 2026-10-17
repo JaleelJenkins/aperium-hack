@@ -112,6 +112,12 @@ function merge(a: PipelineResult, b: PipelineResult): PipelineResult {
             perMessage: [...a.reasonReview.perMessage, ...b.reasonReview.perMessage],
           }
         : (a.reasonReview ?? b.reasonReview),
+    insights: {
+      opened: a.insights.opened + b.insights.opened,
+      updated: a.insights.updated + b.insights.updated,
+      resolved: a.insights.resolved + b.insights.resolved,
+      health: [...a.insights.health, ...b.insights.health],
+    },
   };
 }
 

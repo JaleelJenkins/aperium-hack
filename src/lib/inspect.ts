@@ -9,7 +9,7 @@ import type { Evidence } from "./contracts";
 import { attachmentNames, evidenceLinkFor, modelNames, routeResolver, ticketKeys, type CardKind, type EvidenceLink, type RouteTrace } from "./board";
 import { quoteLine } from "./evidence";
 
-export type InspectRef = { type: "signal" | "action" | "email"; id: string } | { type: "caught" };
+export type InspectRef = { type: "signal" | "action" | "email" | "insight"; id: string } | { type: "caught" };
 
 export function parseInspectRef(v: string | undefined): InspectRef | null {
   if (!v) return null;
@@ -17,7 +17,7 @@ export function parseInspectRef(v: string | undefined): InspectRef | null {
   const i = v.indexOf(":");
   const type = v.slice(0, i);
   const id = v.slice(i + 1);
-  if (!id || (type !== "signal" && type !== "action" && type !== "email")) return null;
+  if (!id || (type !== "signal" && type !== "action" && type !== "email" && type !== "insight")) return null;
   return { type, id };
 }
 
@@ -66,6 +66,18 @@ export interface Inspection {
   routing: RouteTrace | null;
   /** Each model's own note for the source email (latest run). */
   reasoning: ModelNotes | null;
+  /** Insight cards: severity, suggested next step, and whether a rule or a model raised it. */
+  insight?: InsightInfo | null;
+}
+
+export interface InsightInfo {
+  id: string;
+  kind: string;
+  severity: "low" | "medium" | "high";
+  suggestedAction: string | null;
+  byRule: boolean;
+  /** The signal a rule insight was raised on, so the drawer can link to it. */
+  signalRef: string | null;
 }
 
 export interface ApprovalInfo {
@@ -291,6 +303,58 @@ export function inspect(db: DB, ref: InspectRef): Inspection | null {
       messageHref: a.message_id ? `/messages/${encodeURIComponent(a.message_id)}` : null,
       approval: approvalInfo(db, a, p),
       ...trail(a.message_id),
+    };
+  }
+
+  if (ref.type === "insight") {
+    const i = db
+      .prepare(
+        `SELECT i.*, s.message_id AS signal_message_id FROM insights i LEFT JOIN signals s ON s.id = i.signal_id WHERE i.id = ?`,
+      )
+      .get(ref.id) as
+      | {
+          id: string; project_id: string; kind: string; severity: "low" | "medium" | "high"; text: string; suggested_action: string | null;
+          status: string; evidence_json: string; produced_by_model: string; reviewed_by_model: string | null; review_verdict: string | null;
+          review_score: number | null; review_reason: string | null; signal_id: string | null; signal_message_id: string | null;
+        }
+      | undefined;
+    if (!i) return null;
+    const evidence = parseJson<Evidence[]>(i.evidence_json, []);
+    const firstMessage = evidence.find((e) => e.kind === "message");
+    const messageId = i.signal_message_id ?? (firstMessage?.kind === "message" ? firstMessage.message_id : null);
+    const byRule = i.produced_by_model === "rule";
+    return {
+      ref: `insight:${i.id}`,
+      key: null,
+      kind: "insight",
+      title: i.text,
+      status: i.status,
+      dueAt: null,
+      project: projectRef(db, i.project_id),
+      draft: null,
+      sources: sourcesFor(db, evidence),
+      audit: byRule
+        ? null
+        : {
+            producer: model(i.produced_by_model),
+            claim: i.text,
+            originalText: null,
+            reviewer: model(i.reviewed_by_model),
+            verdict: i.review_verdict,
+            score: i.review_score,
+            reason: i.review_reason,
+          },
+      messageHref: messageId ? `/messages/${encodeURIComponent(messageId)}` : null,
+      approval: null,
+      insight: {
+        id: i.id,
+        kind: i.kind,
+        severity: i.severity,
+        suggestedAction: i.suggested_action,
+        byRule,
+        signalRef: i.signal_id ? `signal:${i.signal_id}` : null,
+      },
+      ...trail(messageId),
     };
   }
 

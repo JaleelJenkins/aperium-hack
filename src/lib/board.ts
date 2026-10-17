@@ -4,7 +4,7 @@
  * the board never writes.
  *
  *   Triage            mail on this project still moving through the pipeline
- *   Waiting on us     open client asks, our commitments, deadlines, risks
+ *   Waiting on us     open client asks, our commitments, deadlines, risks, open insights
  *   Waiting on client their open commitments
  *   Needs approval    proposed draft replies and internal tasks (human in the loop)
  *   Done              closed signals, recorded decisions, executed/rejected actions
@@ -41,7 +41,8 @@ export type CardKind =
   | "risk"
   | "draft_reply"
   | "internal_task"
-  | "new_project";
+  | "new_project"
+  | "insight";
 
 export type Health = "on_track" | "at_risk" | "blocked";
 export type DueState = "overdue" | "soon" | "later";
@@ -69,6 +70,8 @@ export interface BoardCard {
   at: string;
   /** Which Reason -> Review pair the router sends this card's email to, and why. */
   route: RouteTrace | null;
+  /** Insight cards only: how serious, and whether a rule or a model raised it. */
+  severity?: "low" | "medium" | "high";
 }
 
 export interface RouteTrace {
@@ -285,6 +288,23 @@ interface ActionRow {
   decided_at: string | null;
   error: string | null;
 }
+interface InsightRow {
+  id: string;
+  project_id: string;
+  kind: string;
+  severity: "low" | "medium" | "high";
+  text: string;
+  suggested_action: string | null;
+  status: string;
+  evidence_json: string;
+  produced_by_model: string;
+  reviewed_by_model: string | null;
+  review_verdict: string | null;
+  review_score: number | null;
+  created_at: string;
+  resolved_at: string | null;
+  message_id: string | null;
+}
 interface MailRow {
   id: string;
   project_id: string | null;
@@ -329,6 +349,14 @@ export function getBoard(db: DB, opts: { filter?: BoardFilter; now?: number } = 
          FROM actions WHERE status != 'superseded'`,
     )
     .all() as ActionRow[];
+
+  const insights = db
+    .prepare(
+      `SELECT i.id, i.project_id, i.kind, i.severity, i.text, i.suggested_action, i.status, i.evidence_json, i.produced_by_model,
+              i.reviewed_by_model, i.review_verdict, i.review_score, i.created_at, i.resolved_at, s.message_id
+         FROM insights i LEFT JOIN signals s ON s.id = i.signal_id`,
+    )
+    .all() as InsightRow[];
 
   // Mail not yet through the pipeline, plus everything on unassigned threads.
   // guessed_client: sender's contact or domain match, resolved in JS to avoid correlated json_each subqueries.
@@ -390,7 +418,7 @@ export function getBoard(db: DB, opts: { filter?: BoardFilter; now?: number } = 
 
   // clean_text lookups for evidence line anchors, loaded once for all cited messages.
   const citedIds = new Set<string>();
-  for (const r of [...signals, ...actions]) {
+  for (const r of [...signals, ...actions, ...insights]) {
     for (const ev of parseEvidence(r.evidence_json)) if (ev.kind === "message") citedIds.add(ev.message_id);
   }
   const cleanText = new Map<string, string>();
@@ -403,7 +431,7 @@ export function getBoard(db: DB, opts: { filter?: BoardFilter; now?: number } = 
   }
   const textFor = (id: string) => cleanText.get(id);
   const citedAttachments: string[] = [];
-  for (const r of [...signals, ...actions]) {
+  for (const r of [...signals, ...actions, ...insights]) {
     for (const ev of parseEvidence(r.evidence_json)) if (ev.kind !== "message") citedAttachments.push(ev.attachment_id);
   }
   const names = attachmentNames(db, citedAttachments);
@@ -498,6 +526,37 @@ export function getBoard(db: DB, opts: { filter?: BoardFilter; now?: number } = 
     }
   }
 
+  const SEVERITY_RANK = { high: 0, medium: 1, low: 2 } as const;
+  for (const i of insights) {
+    const lane = lanes.get(i.project_id);
+    if (!lane) continue;
+    const evidence = parseEvidence(i.evidence_json);
+    const firstMessage = evidence.find((e) => e.kind === "message");
+    const messageId = i.message_id ?? (firstMessage?.kind === "message" ? firstMessage.message_id : null);
+    const link = evidenceLinkFor(evidence[0], textFor, nameFor, messageId);
+    const card: BoardCard = {
+      id: i.id,
+      ref: `insight:${i.id}`,
+      key: null,
+      kind: "insight",
+      title: i.text,
+      detail: i.suggested_action,
+      dueAt: null,
+      dueState: null,
+      href: link.href,
+      evidenceLabel: link.label,
+      evidenceKind: link.kind,
+      review: reviewOf(i.review_verdict, model(i.reviewed_by_model), i.review_score),
+      producedBy: i.produced_by_model === "rule" ? "rule" : model(i.produced_by_model),
+      status: i.status,
+      at: i.resolved_at ?? i.created_at,
+      route: null,
+      severity: i.severity,
+    };
+    if (i.status === "open") lane.columns.on_us.push(card);
+    else doneAll.get(i.project_id)!.push(card);
+  }
+
   for (const a of actions) {
     const lane = a.project_id ? lanes.get(a.project_id) : triage;
     if (!lane) continue;
@@ -561,7 +620,9 @@ export function getBoard(db: DB, opts: { filter?: BoardFilter; now?: number } = 
     });
   }
 
+  // Insights lead the column, most severe first; then everything else by due date.
   const byDue = (a: BoardCard, b: BoardCard) =>
+    (a.kind === "insight" ? SEVERITY_RANK[a.severity ?? "low"] - 3 : 0) - (b.kind === "insight" ? SEVERITY_RANK[b.severity ?? "low"] - 3 : 0) ||
     (a.dueAt ? Date.parse(a.dueAt) : Infinity) - (b.dueAt ? Date.parse(b.dueAt) : Infinity) || b.at.localeCompare(a.at);
   const byRecent = (a: BoardCard, b: BoardCard) => b.at.localeCompare(a.at);
 
@@ -573,7 +634,7 @@ export function getBoard(db: DB, opts: { filter?: BoardFilter; now?: number } = 
     lane.doneTotal = done.length;
     lane.columns.done = done.slice(0, DONE_CAP);
 
-    const openCards = [...lane.columns.on_us, ...lane.columns.on_client];
+    const openCards = [...lane.columns.on_us, ...lane.columns.on_client].filter((c) => c.kind !== "insight");
     lane.stats.open = openCards.length;
     lane.stats.overdue = openCards.filter((c) => c.dueState === "overdue").length;
     lane.stats.dueSoon = openCards.filter((c) => c.dueState === "soon").length;

@@ -451,6 +451,15 @@ const MIGRATIONS: string[] = [
   ALTER TABLE actions ADD COLUMN gmail_draft_message_id TEXT;  -- opens the draft in Gmail
   ALTER TABLE actions ADD COLUMN executed_at TEXT;
   `,
+
+  /* 011: deterministic insight rules (lib/pipeline/insights.ts) */ `
+  -- "<kind>:<signal id>" for rule-made insights: one row per rule per signal, so a rerun
+  -- updates instead of duplicating, and a dismissed insight stays dismissed.
+  ALTER TABLE insights ADD COLUMN rule_key    TEXT;
+  ALTER TABLE insights ADD COLUMN signal_id   TEXT REFERENCES signals(id) ON DELETE CASCADE;
+  ALTER TABLE insights ADD COLUMN resolved_at TEXT;
+  CREATE UNIQUE INDEX IF NOT EXISTS insights_rule_key_idx ON insights(rule_key) WHERE rule_key IS NOT NULL;
+  `,
 ];
 
 export function openDb(file: string): DB {
