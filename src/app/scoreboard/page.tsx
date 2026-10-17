@@ -28,6 +28,15 @@ function badgeClass(b: string) {
   return "risk";
 }
 
+function verdictLabel(b: string): string {
+  if (b === "PARETO OPTIMAL") return "BEST BALANCE";
+  if (b === "OVERKILL (SLOW)") return "HIGH COST / SLOW";
+  if (b === "UNSAFE FOR PROD") return "NOT RECOMMENDED";
+  if (b === "MISSED BEC TRAP") return "MISSED INVOICE CHECK";
+  if (b === "MISSED PDF TRAP") return "MISSED PDF CHECK";
+  return b;
+}
+
 const plainCtx = (over: Partial<RoutingContext>): RoutingContext => ({
   projectId: "kpi",
   hasPdfAttachment: false,
@@ -74,7 +83,7 @@ export default async function ScoreboardPage({ searchParams }: { searchParams: P
           <div className="eyebrow">Model router</div>
           <h1>Model Trust Scoreboard</h1>
           <div className="muted">
-            Reason × Review pairs, routed per email by policy and payload risk. Promote any pair to make it the default.
+            Compare how Draft × Review model pairs balance accuracy, speed, and cost—and choose how incoming emails are routed.
           </div>
         </div>
       </div>
@@ -83,10 +92,8 @@ export default async function ScoreboardPage({ searchParams }: { searchParams: P
 
       {illustrative && (
         <div className="illustrative-note">
-          <span className="tag-illustrative mono">Illustrative</span>
-          Benchmark rows marked illustrative are placeholder numbers, not measured yet. Each one is replaced automatically when the
-          eval runner writes a finished <span className="mono">eval_runs</span> row for that pair. Routing decisions and the dry-run are
-          real.
+          <span className="tag-illustrative mono">Sample benchmark</span>
+          Rows marked sample use baseline numbers until a live evaluation run completes. Routing policies and the email simulator below run live.
         </div>
       )}
 
@@ -94,14 +101,14 @@ export default async function ScoreboardPage({ searchParams }: { searchParams: P
         <div className="kpi">
           <div className="stat-label">
             <Icon name="board" size={12} />
-            Active router policy
+            Active routing policy
           </div>
           <div className="kpi-value small">{POLICY_LABEL[settings.defaultPolicy]}</div>
           <div className="kpi-sub mono">
             {modelFamily(base.selectedPair.reasonModel)} → {modelFamily(base.selectedPair.reviewModel)}
             {risky.selectedPair.id !== base.selectedPair.id && (
               <>
-                {" "}· ↑ {modelFamily(risky.selectedPair.reasonModel)} → {modelFamily(risky.selectedPair.reviewModel)} on risk
+                {" "}· ↑ {modelFamily(risky.selectedPair.reasonModel)} → {modelFamily(risky.selectedPair.reviewModel)} on complex mail
               </>
             )}
           </div>
@@ -109,53 +116,53 @@ export default async function ScoreboardPage({ searchParams }: { searchParams: P
         <div className="kpi">
           <div className="stat-label">
             <Icon name="shield" size={12} />
-            Max rescue lift
+            Review accuracy boost
           </div>
           <div className="kpi-value violet">{signedPct(bestLift.rescueLift)}</div>
-          <div className="kpi-sub">Claims rescued by Stage-2 review before reaching the UI ({modelFamily(bestLift.reasonModel)} → {modelFamily(bestLift.reviewModel)})</div>
+          <div className="kpi-sub">Extra accuracy gained by adding a second review model ({modelFamily(bestLift.reasonModel)} → {modelFamily(bestLift.reviewModel)})</div>
         </div>
         <div className="kpi">
           <div className="stat-label">
             <Icon name="alert" size={12} />
-            Adversarial trap catch
+            Safety checks passed
           </div>
           <div className="kpi-value green">
             {bestTrap.trapsCaughtCount} / 4 <span className="kpi-unit">({pct(bestTrap.trapCatchRate, 0)})</span>
           </div>
-          <div className="kpi-sub">PDF contradiction, stale quoted date, false decision, BEC</div>
+          <div className="kpi-sub">Catches PDF mismatches, outdated dates, unapproved quotes, and suspicious invoices</div>
         </div>
         <div className="kpi">
           <div className="stat-label">
             <Icon name="clock" size={12} />
-            Cost / latency efficiency
+            Speed &amp; cost per email
           </div>
           <div className="kpi-value small mono">
             {secs(optimal.avgLatencyMs)} · {usd(optimal.costPer1kEmailsUsd / 1000)}/email
           </div>
           <div className="kpi-sub">
-            {pct(cheaper, 0)} cheaper than the {modelFamily(frontier.reasonModel)} → {modelFamily(frontier.reviewModel)} frontier baseline
+            {pct(cheaper, 0)} lower cost than the heaviest {modelFamily(frontier.reasonModel)} → {modelFamily(frontier.reviewModel)} pair
           </div>
         </div>
       </div>
 
       <section className="panel table-panel">
         <div className="panel-head">
-          <h2>Asymmetric pair leaderboard</h2>
-          <span className="muted">Ranked by traps caught, then verified accuracy, then speed</span>
+          <h2>Model Pair Comparison</h2>
+          <span className="muted">Ranked by safety checks passed, accuracy after review, and response speed</span>
         </div>
         <div className="table-scroll">
           <table className="leaderboard">
             <thead>
               <tr>
                 <th>#</th>
-                <th>Reason → Review pair</th>
-                <th className="num">Raw reason acc.</th>
-                <th className="num">Post-review acc.</th>
-                <th>Rescue lift (Δ)</th>
-                <th className="num">Signal recall</th>
-                <th>Traps caught</th>
-                <th className="num">Median latency</th>
-                <th className="num">Cost / 1k</th>
+                <th>Draft → Review models</th>
+                <th className="num">Draft accuracy</th>
+                <th className="num">Post review</th>
+                <th>Review boost</th>
+                <th className="num">Items found</th>
+                <th>Safety checks</th>
+                <th className="num">Avg speed</th>
+                <th className="num">Cost / 1k emails</th>
                 <th>Action</th>
               </tr>
             </thead>
@@ -175,12 +182,12 @@ export default async function ScoreboardPage({ searchParams }: { searchParams: P
 
       <section className="panel table-panel">
         <div className="panel-head">
-          <h2>Adversarial trap matrix</h2>
-          <span className="muted">Click a cell to inspect the trap and the review reasoning</span>
+          <h2>Safety Checks by Scenario</h2>
+          <span className="muted">How each model pair handles 4 tricky email scenarios · click any cell to inspect</span>
         </div>
         <div className="table-scroll">
           <div className="matrix">
-            <div className="m-corner mono">Pair</div>
+            <div className="m-corner mono">Model pair</div>
             {TRAP_IDS.map((id) => (
               <div className="m-head" key={id}>
                 <span className="mono">{id}</span>
@@ -197,9 +204,9 @@ export default async function ScoreboardPage({ searchParams }: { searchParams: P
       {run && (
         <section className="panel table-panel">
           <div className="panel-head">
-            <h2>Latest routing dry-run</h2>
+            <h2>Latest Routing Simulation</h2>
             <span className="muted mono">
-              {run.emails} emails · {run.escalated} escalated · {ago(run.finishedAt ?? run.startedAt)}
+              {run.emails} emails · {run.escalated} upgraded · {ago(run.finishedAt ?? run.startedAt)}
             </span>
           </div>
           <div className="table-scroll">
@@ -233,7 +240,7 @@ export default async function ScoreboardPage({ searchParams }: { searchParams: P
                       </td>
                       <td>
                         <span className="route-pair mono">{pp ? `${modelFamily(pp.reasonModel)} → ${modelFamily(pp.reviewModel)}` : d.pair_id}</span>
-                        {d.escalated ? <span className="escalated-pill">Escalated</span> : null}
+                        {d.escalated ? <span className="escalated-pill">Upgraded</span> : null}
                       </td>
                       <td style={{ fontSize: 12.5 }}>{triggers.length ? triggers.join(" · ") : <span className="muted">{d.reason}</span>}</td>
                     </tr>
@@ -261,9 +268,9 @@ function PairRow({ p, rank, active }: { p: ModelPairBenchmark; rank: number; act
             {p.label}
           </span>
           <div className="pair-tags">
-            <span className={`verdict ${badgeClass(p.verdictBadge)}`}>{p.verdictBadge}</span>
+            <span className={`verdict ${badgeClass(p.verdictBadge)}`}>{verdictLabel(p.verdictBadge)}</span>
             {p.source === "illustrative" ? (
-              <span className="tag-illustrative mono">Illustrative</span>
+              <span className="tag-illustrative mono">Sample</span>
             ) : (
               <span className="tag-measured mono">Measured {p.measuredAt ? ago(p.measuredAt) : ""}</span>
             )}
@@ -276,7 +283,7 @@ function PairRow({ p, rank, active }: { p: ModelPairBenchmark; rank: number; act
         {p.reviewModel ? (
           <span className="lift-pill mono">
             <Icon name="shield" size={11} />
-            {signedPct(p.rescueLift)} lift
+            {signedPct(p.rescueLift)} boost
           </span>
         ) : (
           <span className="muted mono">no review</span>

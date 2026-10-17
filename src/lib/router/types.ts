@@ -15,20 +15,33 @@ export type RoutingPolicyMode =
 
 export const POLICY_MODES: RoutingPolicyMode[] = ["pareto_auto", "complexity_escalation", "strict_trust", "low_latency", "pinned"];
 
+/** The 3 active routing policies exposed in the UI controls. */
+export const ACTIVE_POLICY_MODES: RoutingPolicyMode[] = ["complexity_escalation", "low_latency", "strict_trust"];
+
+/** Maps any stored or legacy policy mode to one of the 3 active routing policies. */
+export function normalizeActivePolicy(mode: RoutingPolicyMode): RoutingPolicyMode {
+  if (mode === "low_latency" || mode === "strict_trust") return mode;
+  return "complexity_escalation";
+}
+
 export const POLICY_LABEL: Record<RoutingPolicyMode, string> = {
-  pareto_auto: "Pareto auto",
-  complexity_escalation: "Complexity escalation",
-  strict_trust: "Strict trust SLA",
-  low_latency: "Low latency SLA",
-  pinned: "Pinned pair",
+  pareto_auto: "Balanced (Smart Auto)",
+  complexity_escalation: "Balanced (Smart Auto)",
+  low_latency: "Fast (Speed First)",
+  strict_trust: "Strict Safety",
+  pinned: "Pinned Pair",
 };
 
 export const POLICY_HINT: Record<RoutingPolicyMode, string> = {
-  pareto_auto: "Best trust per unit of cost and latency across all available pairs.",
-  complexity_escalation: "Fast route for plain text; escalates to a 100% trap-safe reviewer when the payload looks risky.",
-  strict_trust: "Every email goes through the fastest pair that caught all planted traps.",
-  low_latency: "Fastest reviewed pair under 2.5s; escalates only when a relative date sits inside quoted text.",
-  pinned: "Always the pinned pair, regardless of payload.",
+  pareto_auto:
+    "Uses a fast, low-cost pair for everyday emails and automatically upgrades to a stronger reviewer when PDFs, billing changes, or unknown senders appear.",
+  complexity_escalation:
+    "Uses a fast, low-cost pair for everyday emails and automatically upgrades to a stronger reviewer when PDFs, billing changes, or unknown senders appear.",
+  low_latency:
+    "Prioritizes speed (under 2.5s per email) with lightweight models, upgrading only when forwarded relative dates could be misread.",
+  strict_trust:
+    "Maximum verification: routes every email through the most thorough model pair that passes all 4 safety checks.",
+  pinned: "Always uses the manually selected model pair for every email.",
 };
 
 /** The four planted traps (seed/labels.json), in PRD order. */
