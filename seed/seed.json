@@ -1,5 +1,5 @@
 {
-  "_readme": "Demo seed (PRD: Demo script and seed data). Three fictional clients, five projects. The seed inbox (seed/emails.ts, npm run seed:inbox) uses the contacts below. Clients are matched by sender domain; free-mail senders (gmail.com) by contact address. Replace CHANGE_ME.live-demo with the teammate who sends the live email from their phone during the demo, then run npm run seed.",
+  "_readme": "Demo seed (PRD: Demo script and seed data). Three fictional clients, five projects. The seed inbox (seed/emails.ts, npm run seed:inbox) uses the contacts below. Clients are matched by sender domain; free-mail senders (gmail.com) by contact address. CHANGE_ME.live-demo is replaced by LIVE_DEMO_SENDER from .env.local (the teammate who sends the live email from their phone) when you run npm run seed.",
   "clients": [
     {
       "id": "harbor-pine",

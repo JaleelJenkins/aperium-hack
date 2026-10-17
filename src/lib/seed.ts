@@ -42,8 +42,24 @@ export type SeedFile = z.infer<typeof SeedFile>;
 export const DEFAULT_SEED_PATH = path.resolve("seed/seed.json");
 export const DEFAULT_USER = "demo";
 
+/** seed.json's stand-in for the teammate who sends the live demo email from their phone. */
+export const LIVE_DEMO_PLACEHOLDER = "change_me.live-demo@gmail.com";
+
+/** LIVE_DEMO_SENDER from .env.local, if it's a plausible address. Lets each machine set it without editing seed.json. */
+export function liveDemoSender(): string | null {
+  const v = process.env.LIVE_DEMO_SENDER?.trim().toLowerCase();
+  return v && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v) ? v : null;
+}
+
 export function readSeed(file = DEFAULT_SEED_PATH): SeedFile {
-  return SeedFile.parse(JSON.parse(fs.readFileSync(file, "utf8")));
+  const seed = SeedFile.parse(JSON.parse(fs.readFileSync(file, "utf8")));
+  const sender = liveDemoSender();
+  if (sender) {
+    for (const c of seed.clients) {
+      for (const ct of c.contacts) if (ct.email.toLowerCase() === LIVE_DEMO_PLACEHOLDER) ct.email = sender;
+    }
+  }
+  return seed;
 }
 
 /**
@@ -64,9 +80,18 @@ export function applySeed(db: DB, seed: SeedFile): string[] {
     for (const c of seed.clients) {
       upClient.run(c.id, c.name, JSON.stringify(c.domains.map((d) => d.toLowerCase())));
       for (const ct of c.contacts) {
-        if (/CHANGE_ME/i.test(ct.email)) warnings.push(`${c.name}: replace placeholder contact ${ct.email}`);
+        if (ct.email.toLowerCase() === LIVE_DEMO_PLACEHOLDER) {
+          warnings.push(`${c.name}: set LIVE_DEMO_SENDER in .env.local to the address that sends the live demo email, then npm run seed`);
+        } else if (/CHANGE_ME/i.test(ct.email)) {
+          warnings.push(`${c.name}: replace placeholder contact ${ct.email}`);
+        }
         upContact.run(ct.email.toLowerCase(), ct.name ?? null, c.id);
       }
+    }
+    // Once the real live sender is configured, drop the placeholder row an earlier seed left behind.
+    const seededEmails = seed.clients.flatMap((c) => c.contacts.map((ct) => ct.email.toLowerCase()));
+    if (!seededEmails.includes(LIVE_DEMO_PLACEHOLDER)) {
+      db.prepare(`DELETE FROM contacts WHERE email = ?`).run(LIVE_DEMO_PLACEHOLDER);
     }
 
     // routing_policy only fills an empty policy; it never overrides a choice made in the UI.

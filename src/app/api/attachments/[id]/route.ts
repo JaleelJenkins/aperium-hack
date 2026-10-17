@@ -6,11 +6,15 @@ import { getDb } from "@/lib/db";
 
 export const runtime = "nodejs";
 
-/** Serve a stored attachment inline (PDFs open in the browser viewer; #page=N works). */
+/**
+ * Serve a downloaded attachment inline (PDFs open in the browser viewer; #page=N works).
+ * Extract moves files from 'stored' to 'extracted'; both are on disk and must stay servable,
+ * or evidence links in the drawer 404 (same rule as lib/evidence.ts checkEvidence).
+ */
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const row = getDb()
-    .prepare(`SELECT filename, mime_type, storage_path FROM attachments WHERE id = ? AND status = 'stored'`)
+    .prepare(`SELECT filename, mime_type, storage_path FROM attachments WHERE id = ? AND status IN ('stored', 'extracted')`)
     .get(id) as { filename: string; mime_type: string; storage_path: string } | undefined;
   if (!row) return NextResponse.json({ error: "not found" }, { status: 404 });
 
