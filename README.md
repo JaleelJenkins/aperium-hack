@@ -137,6 +137,7 @@ npm run worker
 | `OPENROUTER_API_KEY` | same stages | One key for every vendor through [OpenRouter](https://openrouter.ai/keys). Claude models use it when `ANTHROPIC_API_KEY` is empty |
 | `LLM_PROVIDER` | model layer | `auto` (default: Anthropic for Claude when its key is set, else OpenRouter), `anthropic`, or `openrouter` (everything through OpenRouter) |
 | `OPENROUTER_MODEL_GEMINI_FLASH` | router pair `flash-haiku` | an OpenRouter model id; until set, that pair is unavailable to the router |
+| `LLM_TIMEOUT_MS` | model calls | give up on a call with no response after this long and retry it, default `45000` |
 | `PIPELINE_CONCURRENCY` | pipeline | emails processed at once, default `6`. Each email runs Extract → Resolve → Reason → Review end to end, so cards leave Triage as soon as their own email is done |
 | `EXTRACT_PDF` | Extract | PDFs are read from their text layer locally (no model call); set `model` to always send PDFs to `EXTRACT_MODEL`. Scanned PDFs without text fall back to the model automatically |
 | `EXTRACT_IMAGE_MODEL` | Extract | images, default `claude-haiku-5-5` |
@@ -304,6 +305,21 @@ After every pipeline pass (worker, Sync now, `npm run pipeline`), `src/lib/pipel
 ## Sync now: the whole run, live on the board
 
 **Sync now** pulls new mail and runs the full pipeline (Extract → Resolve → Reason → Review → Executor) in the background, the same run as `npm run pipeline`. A **run panel** appears under the page header: a progress bar (`7/15 emails · 42s`), one line per email the moment it finishes (where it was filed, what Review let through, what was caught, Reason and Review seconds), then totals with links to the approval queue and Caught by review, total time and cost. Worker runs show there too. Click a line to open that email.
+
+### Watching a run from the terminal
+
+Whichever terminal runs the pipeline prints every model call as it starts, retries and finishes, then one line per email and a summary: the `npm run dev` terminal for Sync now, the worker's terminal, or `npm run pipeline`.
+
+```
+[pipeline 15:23:31] run started (web): 15 emails waiting, 6 at a time
+[pipeline 15:23:31] → reason   claude-haiku-5-5   "Re: Reception wall: site photo with markups"
+[pipeline 15:23:38] ✓ reason   7.1s  "Re: Reception wall: site photo with markups"
+[pipeline 15:23:40] ↻ review   retry 1 in 2.0s: 429 rate limited  "Fwd: Pilot go-live"
+[pipeline 15:23:45] ✓ email 3/15  Re: Reception wall… → Lobby redesign · 2 signals, 1 to approve  (reason 7.1s + review 4.5s)
+[pipeline 15:24:31] run finished in 60.2s: 15 filed, 15 reviewed, 9 waiting for approval, 5 caught, 0 failed
+```
+
+For a live dashboard in a second terminal, run `npm run pipeline:watch`. It shows who holds the run, progress, every model call in flight with how long it has waited (**slow** after half of `PIPELINE_STUCK_SECONDS`, **STUCK?** after it, default 45), recent retries and errors, average call times per stage and the last emails finished. A model call that gets no response for `LLM_TIMEOUT_MS` (default 45 s) is cancelled and retried, up to 3 attempts. `PIPELINE_LOG=quiet` keeps only the per-email and summary lines.
 
 ## Approvals and review rules
 

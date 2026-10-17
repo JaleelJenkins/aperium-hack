@@ -14,7 +14,9 @@ import { draftApiFor, listAccounts } from "./gmail/client";
 import { syncAll } from "./ingest/sync";
 import { runExecutor, type ExecuteResult } from "./pipeline/execute";
 import { recoverInterrupted } from "./pipeline/review";
-import { finishBatch, logEmail, startBatch } from "./run-log";
+import { log, traceCalls } from "./llm-trace";
+import { PIPELINE_CONCURRENCY } from "./pipeline/run";
+import { finishBatch, latestBatch, logEmail, startBatch } from "./run-log";
 import { defaultDeps, runPipeline, type PipelineDeps, type PipelineResult } from "./pipeline/run";
 import { applySeed, readSeed } from "./seed";
 
@@ -70,7 +72,20 @@ export async function processWaiting(db: DB, owner: string, deps: PipelineDeps =
     const started = Date.now();
     const waiting = (db.prepare(`SELECT COUNT(*) AS n FROM messages WHERE status IN ('ingested', 'extracted', 'resolved', 'reasoned')`).get() as { n: number }).n;
     const batch = waiting ? startBatch(db, owner) : null;
-    const onEmail = batch ? (o: Parameters<typeof logEmail>[2]) => logEmail(db, batch, o) : undefined;
+    // Calls left open by a process that died mid-run can't still be in flight: we hold the lease.
+    db.prepare(`UPDATE llm_calls SET finished_at = ?, error = COALESCE(error, 'abandoned') WHERE finished_at IS NULL`).run(new Date().toISOString());
+    const untrace = traceCalls(db, owner);
+    if (batch) log(`run started (${owner}): ${waiting} email${waiting === 1 ? "" : "s"} waiting, ${PIPELINE_CONCURRENCY} at a time`);
+    let finished = 0;
+    const onEmail = batch
+      ? (o: Parameters<typeof logEmail>[2]) => {
+          logEmail(db, batch, o);
+          const last = latestBatch(db)?.lines[0];
+          finished++;
+          const t = o.reasonMs != null ? `  (reason ${(o.reasonMs / 1000).toFixed(1)}s${o.reviewMs != null ? ` + review ${(o.reviewMs / 1000).toFixed(1)}s` : ""})` : "";
+          log(`${o.failed ? "✗" : "✓"} email ${finished}/${waiting}  ${last?.line ?? o.messageId}${t}`);
+        }
+      : undefined;
     try {
       // Loop until nothing moves: each stage takes a batch, and a big inbox needs several.
       let pipeline = await runPipeline(db, deps, { onEmail });
@@ -80,11 +95,21 @@ export async function processWaiting(db: DB, owner: string, deps: PipelineDeps =
         pipeline = merge(pipeline, next);
       }
       const executor = await runExecutor(db, draftApiFor(db));
-      if (batch) finishBatch(db, batch, started);
+      if (batch) {
+        finishBatch(db, batch, started);
+        const s = latestBatch(db)?.summary;
+        log(
+          `run finished in ${((Date.now() - started) / 1000).toFixed(1)}s: ` +
+            (s ? `${s.filed} filed, ${s.reviewed} reviewed, ${s.approvals} waiting for approval, ${s.caught} caught, ${s.failed} failed` : "done"),
+        );
+      }
       return { ran: true, pipeline, executor };
     } catch (err) {
       if (batch) finishBatch(db, batch, started, err instanceof Error ? err.message : String(err));
+      log(`run failed: ${err instanceof Error ? err.message : String(err)}`);
       throw err;
+    } finally {
+      untrace();
     }
   } finally {
     releasePipelineLock(db, token);

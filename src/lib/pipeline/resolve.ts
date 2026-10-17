@@ -61,6 +61,7 @@ export function claudeMatcher(llm: Llm, model = DEFAULT_MODELS.resolve): Matcher
       const { input: out } = await llm.call<{ project_id: string; confidence: number; reason: string; new_project_name?: string | null }>({
         model,
         hint: "resolve",
+        label: input.subject,
         maxTokens: 600,
         system:
           "You file client emails to the right project for an agency. Compare the email with each of the client's " +
