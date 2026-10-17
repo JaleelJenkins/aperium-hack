@@ -8,27 +8,26 @@ import { useToast } from "../components/Toast";
 import { secs, usd } from "../format";
 import { selectOptimalModelPair } from "@/lib/router/pairRouter";
 import type { ModelPairBenchmark, RoutingPolicyMode } from "@/lib/router/types";
-import { POLICY_HINT, POLICY_LABEL, POLICY_MODES } from "@/lib/router/types";
+import { ACTIVE_POLICY_MODES, normalizeActivePolicy, POLICY_HINT, POLICY_LABEL } from "@/lib/router/types";
 
 const POLICY_ICON: Record<RoutingPolicyMode, "zap" | "shield" | "alert" | "clock" | "board"> = {
   pareto_auto: "zap",
-  complexity_escalation: "shield",
-  strict_trust: "alert",
+  complexity_escalation: "zap",
   low_latency: "clock",
+  strict_trust: "shield",
   pinned: "board",
 };
 
 const SIGNALS = [
   { key: "pdf", label: "PDF attached" },
-  { key: "keywords", label: "Financial / scope keywords" },
+  { key: "keywords", label: "Billing / scope change words" },
   { key: "unknown", label: "Unknown sender domain" },
-  { key: "quoted", label: "Relative date in quoted text" },
+  { key: "quoted", label: "Relative date in forwarded text" },
 ] as const;
 type SimKey = (typeof SIGNALS)[number]["key"];
 
 /**
- * Active routing policy + dry-run payload simulator + "Run seed eval".
- * The simulator runs the same selectOptimalModelPair the server uses, in the browser.
+ * Active routing policy (3 options with definitions) + interactive email simulator + test runner.
  */
 export function RouterConsole({
   leaderboard,
@@ -43,8 +42,8 @@ export function RouterConsole({
 }) {
   const router = useRouter();
   const [toast, show] = useToast();
-  const [policy, setPolicy] = useState(defaultPolicy);
-  useEffect(() => setPolicy(defaultPolicy), [defaultPolicy]); // follow server after a promote
+  const [policy, setPolicy] = useState<RoutingPolicyMode>(normalizeActivePolicy(defaultPolicy));
+  useEffect(() => setPolicy(normalizeActivePolicy(defaultPolicy)), [defaultPolicy]);
   const [pending, startTransition] = useTransition();
   const [sim, setSim] = useState<Record<SimKey, boolean>>({ pdf: true, keywords: true, unknown: false, quoted: false });
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
@@ -85,7 +84,7 @@ export function RouterConsole({
         setProgress({ done: i + 1, total: messageIds.length });
       }
       const s = await finishDryRunAction(runId);
-      show(`Routed ${s.emails} emails: ${s.escalated} escalated, ${s.emails - s.escalated} on the fast route.`);
+      show(`Simulated ${s.emails} emails: ${s.escalated} upgraded to stronger review, ${s.emails - s.escalated} stayed on the fast route.`);
       router.refresh();
     } catch (err) {
       show(err instanceof Error ? err.message : String(err), "bad");
@@ -98,27 +97,40 @@ export function RouterConsole({
   return (
     <section className="console">
       <div className="console-top">
-        <div>
-          <div className="d-section-label">Active routing policy (global default)</div>
-          <nav className="segmented policy-seg" aria-label="Default routing policy">
-            {POLICY_MODES.map((m) => (
-              <button key={m} type="button" className={policy === m ? "on" : ""} onClick={() => changePolicy(m)} disabled={pending}>
-                <Icon name={POLICY_ICON[m]} size={12} />
-                {POLICY_LABEL[m]}
-              </button>
-            ))}
-          </nav>
-          <div className="muted console-hint">{POLICY_HINT[policy]}</div>
+        <div style={{ flex: 1, minWidth: 280 }}>
+          <div className="d-section-label">Active routing policy (choose 1 of 3 global defaults)</div>
+          <div className="policy-cards" role="radiogroup" aria-label="Default routing policy">
+            {ACTIVE_POLICY_MODES.map((m) => {
+              const isOn = policy === m;
+              return (
+                <button
+                  key={m}
+                  type="button"
+                  role="radio"
+                  aria-checked={isOn}
+                  className={`policy-card${isOn ? " on" : ""}`}
+                  onClick={() => changePolicy(m)}
+                  disabled={pending}
+                >
+                  <div className="policy-card-head">
+                    <Icon name={POLICY_ICON[m]} size={13} />
+                    <span>{POLICY_LABEL[m]}</span>
+                    {isOn && <span className="policy-active-dot" aria-hidden="true" />}
+                  </div>
+                  <div className="policy-card-desc">{POLICY_HINT[m]}</div>
+                </button>
+              );
+            })}
+          </div>
         </div>
-        <div className="spacer" />
         <div className="run-eval">
           <button type="button" className="btn primary" onClick={runEval} disabled={progress !== null || emailCount === 0}>
             <Icon name="zap" size={13} />
-            {progress ? `Routing ${progress.done}/${progress.total}…` : `Run seed eval (${emailCount} emails)`}
+            {progress ? `Testing ${progress.done}/${progress.total}…` : `Test router (${emailCount} emails)`}
           </button>
-          <div className="muted run-sub">Routing dry-run: real router, no model calls</div>
+          <div className="muted run-sub">Simulates routing across your inbox (no API cost)</div>
           {progress && (
-            <div className="progress" aria-label="Dry-run progress">
+            <div className="progress" aria-label="Simulation progress">
               <span style={{ width: `${(progress.done / Math.max(progress.total, 1)) * 100}%` }} />
             </div>
           )}
@@ -126,7 +138,7 @@ export function RouterConsole({
       </div>
 
       <div className="simulator">
-        <span className="sim-label mono">Dry-run payload</span>
+        <span className="sim-label mono">Test email signals</span>
         {SIGNALS.map((s) => (
           <label key={s.key} className={`sim-check${sim[s.key] ? " on" : ""}`}>
             <input type="checkbox" checked={sim[s.key]} onChange={(e) => setSim({ ...sim, [s.key]: e.target.checked })} />
@@ -139,7 +151,7 @@ export function RouterConsole({
             <Icon name="zap" size={12} />
             {p.label.replace(" → ", "  →  ")}
           </span>
-          {decision.wasEscalated && <span className="escalated-pill">Escalated</span>}
+          {decision.wasEscalated && <span className="escalated-pill">Upgraded</span>}
           <span className="mono muted">
             {secs(decision.estimatedLatencyMs)} · {usd(decision.estimatedCostUsd)}/email
           </span>
