@@ -137,6 +137,7 @@ npm run worker
 | `OPENROUTER_API_KEY` | same stages | One key for every vendor through [OpenRouter](https://openrouter.ai/keys). Claude models use it when `ANTHROPIC_API_KEY` is empty |
 | `LLM_PROVIDER` | model layer | `auto` (default: Anthropic for Claude when its key is set, else OpenRouter), `anthropic`, or `openrouter` (everything through OpenRouter) |
 | `OPENROUTER_MODEL_GEMINI_FLASH` | router pair `flash-haiku` | an OpenRouter model id; until set, that pair is unavailable to the router |
+| `LLM_FALLBACK` | model calls | with both keys set, Anthropic calls fail over to OpenRouter on 429 / 529 / 5xx / no answer within `LLM_HEDGE_MS` (default `20000`); two rate limits in a minute send everything to OpenRouter for 2 minutes. `off` disables it |
 | `LLM_TIMEOUT_MS` | model calls | give up on a call with no response after this long and retry it, default `45000` |
 | `PIPELINE_CONCURRENCY` | pipeline | emails processed at once, default `6`. Each email runs Extract → Resolve → Reason → Review end to end, so cards leave Triage as soon as their own email is done |
 | `EXTRACT_PDF` | Extract | PDFs are read from their text layer locally (no model call); set `model` to always send PDFs to `EXTRACT_MODEL`. Scanned PDFs without text fall back to the model automatically |
@@ -318,6 +319,8 @@ Whichever terminal runs the pipeline prints every model call as it starts, retri
 [pipeline 15:23:45] ✓ email 3/15  Re: Reception wall… → Lobby redesign · 2 signals, 1 to approve  (reason 7.1s + review 4.5s)
 [pipeline 15:24:31] run finished in 60.2s: 15 filed, 15 reviewed, 9 waiting for approval, 5 caught, 0 failed
 ```
+
+With both `ANTHROPIC_API_KEY` and `OPENROUTER_API_KEY` set, a call that Anthropic rate-limits, overloads or doesn't answer within 20 s is sent to OpenRouter (same model) instead of waiting and retrying; the log shows `↪ review → OpenRouter anthropic/claude-sonnet-5.5 (Anthropic: 429 rate limited)` and then `✓ review 6.2s via OpenRouter`. After two rate limits in a minute, calls skip Anthropic for 2 minutes. To send everything through OpenRouter, set `LLM_PROVIDER=openrouter`.
 
 For a live dashboard in a second terminal, run `npm run pipeline:watch`. It shows who holds the run, progress, every model call in flight with how long it has waited (**slow** after half of `PIPELINE_STUCK_SECONDS`, **STUCK?** after it, default 45), recent retries and errors, average call times per stage and the last emails finished. A model call that gets no response for `LLM_TIMEOUT_MS` (default 45 s) is cancelled and retried, up to 3 attempts. `PIPELINE_LOG=quiet` keeps only the per-email and summary lines.
 

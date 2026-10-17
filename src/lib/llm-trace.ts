@@ -6,7 +6,8 @@
  *
  *   [pipeline 15:23:31] → reason   claude-haiku-5-5  "Re: Reception wall: site photo…"
  *   [pipeline 15:23:38] ✓ reason   7.1s  "Re: Reception wall: site photo…"
- *   [pipeline 15:23:40] ↻ review   retry 1 in 2.0s: 429 rate limited  "Fwd: Pilot go-live"
+ *   [pipeline 15:23:40] ↪ review   → OpenRouter anthropic/claude-sonnet-5.5 (Anthropic: 429 rate limited)  "Fwd: Pilot go-live"
+ *   [pipeline 15:23:46] ✓ review   6.2s via OpenRouter  "Fwd: Pilot go-live"
  *   [pipeline 15:24:01] ✓ email 5/15  Fwd: Pilot go-live → Driver app pilot · 1 signal  (reason 6.2s + review 9.8s)
  *
  * Set PIPELINE_LOG=quiet to keep only the per-email and summary lines.
@@ -31,7 +32,7 @@ const short = (s: string | null | undefined, n = 48) => (s ? `"${s.length > n ? 
 
 /** Installs the tracer for one pipeline run; returns a function that removes it. */
 export function traceCalls(db: DB, source: string): () => void {
-  const open = new Map<string, { stage: string; label: string | null }>();
+  const open = new Map<string, { stage: string; label: string | null; switched?: boolean }>();
   const obs: CallObserver = {
     start(info) {
       const id = randomUUID();
@@ -52,12 +53,20 @@ export function traceCalls(db: DB, source: string): () => void {
       db.prepare(`UPDATE llm_calls SET attempts = ?, last_retry = ? WHERE id = ?`).run(attempt + 1, reason, id);
       log(`↻ ${(c?.stage ?? "call").padEnd(8)} retry ${attempt}${waitMs ? ` in ${(waitMs / 1000).toFixed(1)}s` : ""}: ${reason}  ${short(c?.label)}`);
     },
+    switched(id, to, reason) {
+      const c = open.get(id);
+      if (c) c.switched = true;
+      db.prepare(`UPDATE llm_calls SET provider = provider || '→' || ?, last_retry = ? WHERE id = ?`).run(to.provider, reason, id);
+      log(`↪ ${(c?.stage ?? "call").padEnd(8)} → OpenRouter ${to.model} (${reason})  ${short(c?.label)}`);
+    },
     end(id, r) {
       const c = open.get(id);
       open.delete(id);
       db.prepare(`UPDATE llm_calls SET finished_at = ?, ms = ?, error = ? WHERE id = ?`).run(new Date().toISOString(), r.ms, r.error ?? null, id);
       if (!r.ok) log(`✗ ${(c?.stage ?? "call").padEnd(8)} ${(r.ms / 1000).toFixed(1)}s  ${r.error}  ${short(c?.label)}`);
-      else if (!quiet()) log(`✓ ${(c?.stage ?? "call").padEnd(8)} ${(r.ms / 1000).toFixed(1)}s  ${short(c?.label)}`);
+      else if (!quiet() || c?.switched)
+        log(`✓ ${(c?.stage ?? "call").padEnd(8)} ${(r.ms / 1000).toFixed(1)}s${c?.switched ? ` via ${r.provider === "openrouter" ? "OpenRouter" : "Anthropic (answered first)"}` : ""}  ${short(c?.label)}`);
+      if (r.ok && c?.switched && r.provider) db.prepare(`UPDATE llm_calls SET provider = ? WHERE id = ?`).run(`failover:${r.provider}`, id);
     },
   };
   setCallObserver(obs);
