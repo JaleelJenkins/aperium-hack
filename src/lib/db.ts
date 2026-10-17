@@ -1,9 +1,69 @@
 import fs from "node:fs";
 import path from "node:path";
-import Database from "better-sqlite3";
+import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { config } from "./config";
 
-export type DB = Database.Database;
+/**
+ * Thin wrapper over Node's built-in SQLite (node:sqlite, Node 22.13+), so
+ * `npm install` never compiles a native module. Exposes the small surface the
+ * app uses: prepare / exec / transaction / close.
+ */
+type Params = SQLInputValue[] | [Record<string, SQLInputValue>, ...SQLInputValue[]];
+
+/** Rows come back untyped; callers cast to their row interface. */
+export interface Statement {
+  run(...params: Params): { changes: number; lastInsertRowid: number };
+  get(...params: Params): unknown;
+  all(...params: Params): unknown[];
+}
+
+export class DB {
+  private readonly raw: DatabaseSync;
+  private depth = 0;
+
+  constructor(file: string) {
+    this.raw = new DatabaseSync(file);
+  }
+
+  prepare(sql: string): Statement {
+    const stmt = this.raw.prepare(sql);
+    return {
+      run: (...p) => {
+        const r = stmt.run(...(p as SQLInputValue[]));
+        return { changes: Number(r.changes), lastInsertRowid: Number(r.lastInsertRowid) };
+      },
+      get: (...p) => stmt.get(...(p as SQLInputValue[])),
+      all: (...p) => stmt.all(...(p as SQLInputValue[])),
+    };
+  }
+
+  exec(sql: string): void {
+    this.raw.exec(sql);
+  }
+
+  /** db.transaction(fn)() runs fn atomically; nested calls use savepoints. */
+  transaction<T>(fn: () => T): () => T {
+    return () => {
+      const sp = `sp_${this.depth}`;
+      this.raw.exec(this.depth === 0 ? "BEGIN IMMEDIATE" : `SAVEPOINT ${sp}`);
+      this.depth++;
+      try {
+        const result = fn();
+        this.depth--;
+        this.raw.exec(this.depth === 0 ? "COMMIT" : `RELEASE ${sp}`);
+        return result;
+      } catch (err) {
+        this.depth--;
+        this.raw.exec(this.depth === 0 ? "ROLLBACK" : `ROLLBACK TO ${sp}; RELEASE ${sp}`);
+        throw err;
+      }
+    };
+  }
+
+  close(): void {
+    this.raw.close();
+  }
+}
 
 /**
  * Data model from the PRD ("Architecture, data model and stack"), plus
@@ -224,20 +284,19 @@ const MIGRATIONS: string[] = [
 
 export function openDb(file: string): DB {
   if (file !== ":memory:") fs.mkdirSync(path.dirname(file), { recursive: true });
-  const db = new Database(file);
-  db.pragma("journal_mode = WAL"); // worker and web app share the file
-  db.pragma("busy_timeout = 5000");
-  db.pragma("foreign_keys = ON");
+  const db = new DB(file);
+  // WAL: the worker and the web app share the file.
+  db.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON;");
   migrate(db);
   return db;
 }
 
 function migrate(db: DB): void {
-  const current = db.pragma("user_version", { simple: true }) as number;
+  const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
   for (let v = current; v < MIGRATIONS.length; v++) {
     db.transaction(() => {
       db.exec(MIGRATIONS[v]);
-      db.pragma(`user_version = ${v + 1}`);
+      db.exec(`PRAGMA user_version = ${v + 1}`);
     })();
   }
 }

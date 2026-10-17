@@ -45,6 +45,6 @@ export const config = {
 export function assertGoogleConfigured(): void {
   const missing = ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"].filter((k) => !process.env[k]);
   if (missing.length) {
-    throw new Error(`Missing ${missing.join(", ")}. Copy .env.example to .env.local and fill it in.`);
+    throw new Error(`Missing ${missing.join(", ")} in .env.local. Add them, then restart npm run dev.`);
   }
 }
